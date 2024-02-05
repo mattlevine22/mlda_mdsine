@@ -21,6 +21,8 @@ PERT_FNAME = "../data/perturbations.tsv"
 n_subsample = 1
 SIMS_FNAME = f"../data/solutions_custom/subsample{n_subsample}"
 
+# PARAM_DIR = "/Users/levinema/code_projects/MDSINE2/tmp/"
+PARAM_DIR = "~/code_projects/MDSINE2/tmp/"
 
 def load_dyn_sys_class(dataset_name):
     dataset_classes = {
@@ -72,7 +74,7 @@ class GeneralizedLotkaVolterra(DynSys):
     def __init__(
         self,
         patient_id="2",  # only used to choose which mechanistic parameter set is best (also loads perturbations, but these are the same across patients currently)
-        param_dir="/Users/levinema/code_projects/MDSINE2/tmp/",
+        param_dir=PARAM_DIR,
     ):
         super(GeneralizedLotkaVolterra, self).__init__()
 
