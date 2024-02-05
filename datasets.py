@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import torch
@@ -22,7 +23,7 @@ n_subsample = 1
 SIMS_FNAME = f"../data/solutions_custom/subsample{n_subsample}"
 
 # PARAM_DIR = "/Users/levinema/code_projects/MDSINE2/tmp/"
-PARAM_DIR = "~/code_projects/MDSINE2/tmp/"
+PARAM_DIR = os.path.expanduser("~/code_projects/MDSINE2/tmp/")
 
 def load_dyn_sys_class(dataset_name):
     dataset_classes = {
