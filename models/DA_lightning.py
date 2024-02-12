@@ -138,22 +138,30 @@ class DataAssimilatorModule(pl.LightningModule):
             normalization_stats=normalization_stats,
         )
 
-        # add mechanistic ODE parameters to device
-        self.model.rhs.mech_ode.to_device(self.device)
+
 
     def long_solve(self, device="cpu", stage="val"):
         """This function solves the ODE for a long time, and returns the entire trajectory"""
         # solve the ODE using the initial conditions x0 and time points t
         # solve using default odesolver parameters (atol=1e-7, rtol=1e-9, dopri5)
         x = self.model.solve(
-            self.x0_inv.to(device),
-            self.t_inv[stage].to(device),
+            self.x0_inv, #.to(device),
+            self.t_inv[stage], #.to(device),
             params=self.model.odeint_params,
         )
         # x is (N_times, N_batch, dim_state)
         return x
 
     def forward(self, y_obs, times, controls):
+
+        if self.first_forward:
+            self.first_forward = False
+            # set device for mech ode
+            self.model.rhs.mech_ode.to_device(y_obs.device)
+            self.x0_inv = self.x0_inv.to(y_obs)
+            self.t_inv = {key: val.to(y_obs.device) if val is not None else None
+                    for key, val in self.t_inv.items()}
+
         # since times currently have the same SPACING across all batches, we can reduce this to just the first batch
         times = times[0].squeeze()
 
