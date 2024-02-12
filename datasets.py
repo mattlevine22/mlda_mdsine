@@ -150,6 +150,13 @@ class MDData(object):
         self.sims_name = sims_name
         self.x = md2.Study.load(fname)
         self.limit_of_detection = 1e5
+        self.best_mcmc_sims = {}  # New attribute to store best sims
+
+    def load_best_mcmc_simulation(self, patient_id):
+        _, best_sim, _, _ = self.get_best_sim(patient_id)
+        # Assuming best_sim is a numpy array; convert it to a tensor
+        best_sim_tensor = torch.from_numpy(best_sim).float().T
+        return best_sim_tensor
 
     def get_patient(self, patient_id):
         t = torch.from_numpy(self.x[str(patient_id)].times).float()
@@ -253,6 +260,14 @@ class MDDataset(Dataset):
 
     def __getitem__(self, idx):
         patient_id = self.patients[idx]
+
+        if patient_id not in self.data.best_mcmc_sims:
+            self.data.best_mcmc_sims[patient_id] = self.data.load_best_mcmc_simulation(
+                patient_id
+            )
+
+        best_mcmc_sim_batch = self.data.best_mcmc_sims[patient_id]
+
         t, x, mask = self.data.get_patient(patient_id)
         perturbation = []
         # perturbation = self.data.load_perturbations(patient_id)
@@ -273,6 +288,7 @@ class MDDataset(Dataset):
             y_obs_batch,
             x_true_batch,
             y_true_batch,
+            best_mcmc_sim_batch,
             times_batch,
             mask_batch,
             controls_batch,

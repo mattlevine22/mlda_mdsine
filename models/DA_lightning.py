@@ -138,8 +138,6 @@ class DataAssimilatorModule(pl.LightningModule):
             normalization_stats=normalization_stats,
         )
 
-
-
     def long_solve(self, device="cpu", stage="val"):
         """This function solves the ODE for a long time, and returns the entire trajectory"""
         # solve the ODE using the initial conditions x0 and time points t
@@ -274,7 +272,7 @@ class DataAssimilatorModule(pl.LightningModule):
         # print("Training step")
         # bp()
         # print(self.model.rhs.f_nn.state_dict())
-        y_obs, x_true, y_true, times, mask, controls, invariant_stats_true = batch
+        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
             y_obs, times, controls
         )
@@ -292,6 +290,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 y_obs,
                 x_true,
                 y_true,
+                best_mcmc_sims,
                 times,
                 y_pred,
                 x_pred,
@@ -358,7 +357,7 @@ class DataAssimilatorModule(pl.LightningModule):
             )
 
     def validation_step(self, batch, batch_idx):
-        y_obs, x_true, y_true, times, mask, controls, invariant_stats_true = batch
+        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
             y_obs, times, controls
         )
@@ -381,6 +380,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 y_obs,
                 x_true,
                 y_true,
+                best_mcmc_sims,
                 times,
                 y_pred,
                 x_pred,
@@ -400,6 +400,7 @@ class DataAssimilatorModule(pl.LightningModule):
         y_obs,
         x_true,
         y_true,
+        best_mcmc_sims,
         times,
         y_pred,
         x_pred,
@@ -421,6 +422,7 @@ class DataAssimilatorModule(pl.LightningModule):
             y_obs_idx = y_obs[idx].detach().cpu().numpy()
             y_true_idx = y_true[idx].detach().cpu().numpy()
             x_true_idx = x_true[idx].detach().cpu().numpy()
+            best_mcmc_sims_idx = best_mcmc_sims[idx].detach().cpu().numpy()
             times_idx = times[idx].detach().cpu().numpy()
             y_pred_idx = y_pred[idx].detach().cpu().numpy()
             x_pred_idx = x_pred[idx].detach().cpu().numpy()
@@ -438,6 +440,11 @@ class DataAssimilatorModule(pl.LightningModule):
                 ncols=1,
             )
 
+            fig2, ax2 = plt.subplots(
+                nrows=1,
+                ncols=1,
+            )
+
             mean_error = np.mean(np.log10(y_obs_idx) - np.log10(y_pred_idx), axis=1)
             mask_sum = np.sum(mask_idx, axis=1)
 
@@ -450,28 +457,97 @@ class DataAssimilatorModule(pl.LightningModule):
                 / mask_sum
             )
 
+            # compute mean_error and mean_error_masked for best_mcmc_sims
+            mean_error_mcmc = np.mean(np.log10(y_obs_idx) - np.log10(best_mcmc_sims_idx), axis=1)
+            mean_error_masked_mcmc = (
+                np.sum(
+                    (mask_idx * (np.log10(y_obs_idx) - np.log10(best_mcmc_sims_idx))),
+                    axis=1,
+                )
+                / mask_sum
+            )
+
+            # Example percentile calculations (replace with your actual error arrays)
+            error_percentiles = np.percentile(y_obs_idx - y_pred_idx, [25, 75], axis=1)
+            error_percentiles_mcmc = np.percentile(y_obs_idx - best_mcmc_sims_idx, [25, 75], axis=1)
+
+            # make MCMC runs black and model runs blue
+            # make masked runs dotted and unmasked runs solid
             ax.plot(
                 times_idx,
                 mean_error,
-                label="Unmasked",
+                label="Mech + NN: Unmasked",
+                color="blue",
+                linestyle="-",
+            )
+            ax2.plot(
+                times_idx,
+                mean_error_masked,
+                label="Mech + NN: Masked",
+                color="blue",
+                linestyle=":",
             )
             ax.plot(
                 times_idx,
-                mean_error_masked,
-                label="Masked",
+                mean_error_mcmc,
+                label="Best pure mechanistic: Unmasked",
+                color="black",
+                linestyle="-",
+            )
+            ax2.plot(
+                times_idx,
+                mean_error_masked_mcmc,
+                label="Best pure mechanistic: Masked",
+                color="black",
+                linestyle=":",
             )
 
             # plot a horizontal line at 0
-            ax.axhline(0, color="k", linestyle="--")
+            ax.axhline(0, color="gray", linestyle="--")
             ax.set_xlabel("Time")
             ax.legend()
-
             # set yscale to [-1.2,1.2] or
-            ax.set_ylim([-1.2, 1.2])
+
+            # Add shaded regions for percentile-based error bars
+            ax.fill_between(
+                times_idx,
+                error_percentiles[0],
+                error_percentiles[1],
+                color="blue",
+                alpha=0.2,
+            )
+            ax.fill_between(
+                times_idx,
+                error_percentiles_mcmc[0],
+                error_percentiles_mcmc[1],
+                color="black",
+                alpha=0.2,
+            )
+
             fig.suptitle(
                 "Log-Residuals for each patient\n E[log10(x_true(t)) - log10(x_sim(t))](t)"
             )
+
+            # return ylim to default
+            ax.set_yscale("symlog", linthresh=1)
+            wandb.log({f"plots/{tag}/SummaryTraj_quantile25to75_{idx}": wandb.Image(fig)})
+
+            ax.set_yscale("linear")
+            ax.set_ylim([-1.2, 1.2])
             wandb.log({f"plots/{tag}/SummaryTraj_{idx}": wandb.Image(fig)})
+
+            # plot a horizontal line at 0
+            ax2.axhline(0, color="gray", linestyle="--")
+            ax2.set_xlabel("Time")
+            ax2.legend()
+            # set yscale to [-1.2,1.2] or
+            # ax2.set_yscale("symlog", linthresh=1)
+            ax2.set_ylim([-1.2, 1.2])
+            fig2.suptitle(
+                "Masked Log-Residuals for each patient\n E[log10(x_true(t)) - log10(x_sim(t))](t)"
+            )
+            wandb.log({f"plots/{tag}/SummaryTraj_masked_{idx}": wandb.Image(fig2)})
+
             plt.close("all")
 
             # Plot Trajectories
@@ -533,6 +609,18 @@ class DataAssimilatorModule(pl.LightningModule):
                     label="Prediction",
                 )
 
+                # plot the best MCMC simulation
+                ax.plot(
+                    times_idx,
+                    best_mcmc_sims_idx[:, i],
+                    ls="",
+                    marker="o",
+                    markersize=5,
+                    markerfacecolor="none",
+                    color="orange",
+                    label="Best pure mechanistic",
+                )
+
                 # plot the noisy observations that we are fitting to
                 ax.plot(
                     times_idx,
@@ -580,6 +668,17 @@ class DataAssimilatorModule(pl.LightningModule):
                     markerfacecolor="none",
                     color="blue",
                     label="Prediction",
+                )
+                # plot the best MCMC simulation
+                ax.plot(
+                    times_idx[-20:],
+                    best_mcmc_sims_idx[-20:, i],
+                    ls="",
+                    marker="o",
+                    markersize=5,
+                    markerfacecolor="none",
+                    color="orange",
+                    label="Best pure mechanistic",
                 )
                 ax.plot(
                     times_idx[-20:],
@@ -749,7 +848,7 @@ class DataAssimilatorModule(pl.LightningModule):
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         dt = self.trainer.datamodule.test_sample_rates[dataloader_idx]
-        y_obs, x_true, y_true, times, mask, controls, invariant_stats_true = batch
+        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
 
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
             y_obs, times, controls
@@ -779,6 +878,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 y_obs,
                 x_true,
                 y_true,
+                best_mcmc_sims,
                 times,
                 y_pred,
                 x_pred,
