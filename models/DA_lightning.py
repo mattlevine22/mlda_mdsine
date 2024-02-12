@@ -90,6 +90,9 @@ class DataAssimilatorModule(pl.LightningModule):
         self.monitor_metric = monitor_metric
         self.lr_scheduler_params = lr_scheduler_params
 
+        self.low_bound_latent = low_bound_latent
+        self.high_bound_latent = high_bound_latent
+
         # initial condition for the long trajectory
         # make the initial condition 1e7 for the mechanistic variables then 0 for the rest
         self.x0_inv = torch.zeros(1, dim_state)
@@ -134,6 +137,9 @@ class DataAssimilatorModule(pl.LightningModule):
             normalizer=normalizer,
             normalization_stats=normalization_stats,
         )
+
+        # add mechanistic ODE parameters to device
+        self.model.rhs.mech_ode.to_device(self.device)
 
     def long_solve(self, device="cpu", stage="val"):
         """This function solves the ODE for a long time, and returns the entire trajectory"""

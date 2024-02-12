@@ -112,6 +112,12 @@ class GeneralizedLotkaVolterra(DynSys):
             k: torch.from_numpy(v[iter]).float() for k, v in pert_params.items()
         }
 
+    def to_device(self, device):
+        """Move all tensors to the specified device."""
+        self.r = self.r.to(device)
+        self.A = self.A.to(device)
+        self.pert_params = {k: v.to(device) for k, v in self.pert_params.items()}
+
     def rhs(self, t, x):
         # Generalized Lotka-Volterra equations
         # dx/dt = x * [r * ( 1 + gamma(t) ) + Ax]
