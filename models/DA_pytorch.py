@@ -171,8 +171,8 @@ class DataAssimilator(nn.Module):
         n_times = y_obs.shape[1]
 
         # Pre-allocation of S_values
-        S_values = torch.zeros((batch_size, n_times, self.dim_obs, self.dim_obs))
-        S_inv_values = torch.zeros((batch_size, n_times, self.dim_obs, self.dim_obs))
+        S_values = torch.zeros((batch_size, n_times, self.dim_obs, self.dim_obs)).to(y_obs)
+        S_inv_values = torch.zeros((batch_size, n_times, self.dim_obs, self.dim_obs)).to(y_obs)
 
         S_values[:] = self.S.unsqueeze(0).unsqueeze(0)
         S_inv_values[:] = self.S_inv.unsqueeze(0).unsqueeze(0)
