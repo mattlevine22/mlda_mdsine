@@ -34,6 +34,8 @@ class DataAssimilator(nn.Module):
         nn_coefficient_scaling: float = 1e3,
         low_bound: float = 1e5,
         high_bound: float = 1e12,
+        low_bound_latent: float = 0,
+        high_bound_latent: float = 1,
         num_hidden_layers: int = 1,
         layer_width: int = 50,
         activations: int = "gelu",
@@ -67,6 +69,8 @@ class DataAssimilator(nn.Module):
             nn_coefficient_scaling=nn_coefficient_scaling,
             low_bound=low_bound,
             high_bound=high_bound,
+            low_bound_latent=low_bound_latent,
+            high_bound_latent=high_bound_latent,
         )
 
         # initialize the observation map to be an unbiased identity map
@@ -173,15 +177,20 @@ class DataAssimilator(nn.Module):
         S_values[:] = self.S.unsqueeze(0).unsqueeze(0)
         S_inv_values[:] = self.S_inv.unsqueeze(0).unsqueeze(0)
 
+        # x_init: concatenate y_obs[:, 0] with remaining states self.x0[self.dim_obs:]
+        x_init = torch.cat((y_obs[:, 0], self.x0[self.dim_obs:].view(1, -1)), dim=1)
+
         # solve the ODE using the initial conditions x0 and time points t
-        x_pred = self.solve(y_obs[:, 0], times, params=self.odeint_params)
+        x_pred = self.solve(x_init, times, params=self.odeint_params)
         # x_pred: (N_times, N_batch, dim_state)
         # y_obs: (N_batch, N_times, dim_obs)
         # make x_pred: (N_batch, N_times, dim_state)
         x_pred = x_pred.permute(1, 0, 2)
-        y_pred = x_pred
-        y_assim = x_pred
         x_assim = x_pred
+
+        # map to observation space
+        y_pred = x_pred[:, :, : self.dim_obs]
+        y_assim = x_pred[:, :, : self.dim_obs]
 
         return (y_pred, y_assim, x_pred, x_assim, S_values, S_inv_values)
 
@@ -473,6 +482,8 @@ class HybridODE(nn.Module):
         dropout=0.01,
         low_bound=1e5,
         high_bound=1e12,
+        low_bound_latent=0,
+        high_bound_latent=1,
         nn_coefficient_scaling=1e3,
     ):
         super(HybridODE, self).__init__()
@@ -481,6 +492,8 @@ class HybridODE(nn.Module):
         self.normalizer = normalizer
         self.low_bound = low_bound
         self.high_bound = high_bound
+        self.low_bound_latent = low_bound_latent
+        self.high_bound_latent = high_bound_latent
         self.nn_coefficient_scaling = nn_coefficient_scaling
 
         self.mech_ode = ode
@@ -503,22 +516,33 @@ class HybridODE(nn.Module):
     def forward(self, t, x):
         rhs = torch.zeros_like(x, requires_grad=True).to(x)
 
-        # print("x: ", x)
+        D = x.shape[1]  # full state dimension
+        if self.use_physics:
+            D = self.mech_ode.state_dim  # mechanistic state dimension
+
+        # print(f"x({t}): ", x)
         if torch.any(torch.isnan(x)):
             bp()
 
-        # if x is outside of [-1e15,1e15], set rhs to 0 to achieve fixed point at a boundary instead of blow-up
-
         # clamp x to be in range [1e5, 1e12] ...recall that 1e5 is detection threshold
-        x = torch.clamp(x, self.low_bound, self.high_bound)
-
-        # if torch.any(torch.abs(x) > bound):
-        #     # pass
-        #     return rhs
-        # else:
+        # clamp x in up to D dimensions
+        # in latent dimensions clamp [-1, 1]
+        x = torch.cat(
+            (
+                torch.clamp(
+                    x[:, :D], self.low_bound, self.high_bound
+                ),  # mechanistic state clamp
+                torch.clamp(
+                    x[:, D:], self.low_bound_latent, self.high_bound_latent
+                ),  # latent state clamp
+            ),
+            dim=1,
+        )
 
         if self.use_physics:
-            rhs = rhs + self.mech_ode.rhs(t, x)  # self.f_physics(x, t)
+            # errored due to in-place operation
+            # rhs[:, :D] = rhs[:, :D] + self.mech_ode.rhs(t, x)  # self.f_physics(x, t)
+            rhs = torch.cat((rhs[:, :D] + self.mech_ode.rhs(t, x[:, :D]), rhs[:, D:]), dim=1)
 
         # determine control categories
         names = ["High Fat Diet", "Vancomycin", "Gentamicin"]
@@ -531,8 +555,10 @@ class HybridODE(nn.Module):
                 one_hot_control[:, names.index(key)] = 1
 
         if self.use_nn:
-            # apply normalization to x
-            x_scaled = self.normalizer.encode(x)
+            x_scaled = x.clone()
+
+            # apply normalization to observed components of x
+            x_scaled[:, :D] = self.normalizer.encode(x[:, :D])
 
             # concatenate one-hot control to x_scaled and pass through NN
             # x_scaled: (N_batch, dim_state)
@@ -549,7 +575,10 @@ class HybridODE(nn.Module):
             # pass
             # print("nn_scaled: ", nn_scaled)
             # add_term = self.nn_coefficient_scaling * nn_scaled
-            add_term = x * nn_scaled
+            add_term = torch.zeros_like(x, requires_grad=True).to(x)
+
+            # in the observed components of x, do x*NN, else do NN
+            add_term = torch.cat((x[:, :D] * nn_scaled[:, :D], nn_scaled[:, D:]), dim=1)
 
             # print ratio of nn to physics
             # print("nn / physics: ", torch.mean(torch.abs(add_term / rhs)))
@@ -561,7 +590,23 @@ class HybridODE(nn.Module):
 
         # clamp rhs to be non-negative for states where x is at the lower bound
         # and clamp rhs to be non-positive for states where x is at the upper bound
-        rhs[x == self.low_bound] = torch.clamp_min(rhs[x == self.low_bound], 0)
-        rhs[x == self.high_bound] = torch.clamp_max(rhs[x == self.high_bound], 0)
+        # only apply this to the observed components of x
 
+        # mech
+        min_condition = x[:, :D] == self.low_bound
+        rhs[:, :D][min_condition] = torch.clamp_min(rhs[:, :D][min_condition], 0)
+
+        # latent
+        min_condition = x[:, D:] == self.low_bound_latent
+        rhs[:, D:][min_condition] = torch.clamp_min(rhs[:, D:][min_condition], 0)
+
+        # mech
+        max_condition = x[:, :D] == self.high_bound
+        rhs[:, :D][max_condition] = torch.clamp_max(rhs[:, :D][max_condition], 0)
+
+        # latent
+        max_condition = x[:, D:] == self.high_bound_latent
+        rhs[:, D:][max_condition] = torch.clamp_max(rhs[:, D:][max_condition], 0)
+
+        # print(f"rhs({t}): ", rhs)
         return rhs

@@ -50,6 +50,8 @@ class DataAssimilatorModule(pl.LightningModule):
         nn_coefficient_scaling=1e4,
         low_bound=1e5,
         high_bound=1e12,
+        low_bound_latent=0,
+        high_bound_latent=1,
         num_hidden_layers=1,
         learn_h=False,
         learn_ObsCov=False,
@@ -89,7 +91,9 @@ class DataAssimilatorModule(pl.LightningModule):
         self.lr_scheduler_params = lr_scheduler_params
 
         # initial condition for the long trajectory
-        self.x0_inv = torch.zeros(1, dim_state) + 1e7
+        # make the initial condition 1e7 for the mechanistic variables then 0 for the rest
+        self.x0_inv = torch.zeros(1, dim_state)
+        self.x0_inv[:, :dim_obs] = 1e7
 
         # time points for the long trajectory
         self.t_inv = {
@@ -117,6 +121,8 @@ class DataAssimilatorModule(pl.LightningModule):
             nn_coefficient_scaling=nn_coefficient_scaling,
             low_bound=low_bound,
             high_bound=high_bound,
+            low_bound_latent=low_bound_latent,
+            high_bound_latent=high_bound_latent,
             num_hidden_layers=num_hidden_layers,
             layer_width=layer_width,
             dropout=dropout,
@@ -455,7 +461,7 @@ class DataAssimilatorModule(pl.LightningModule):
             plt.close("all")
 
             # Plot Trajectories
-            n_rows = y_obs.shape[-1] + 2
+            n_rows = y_obs.shape[-1] + 3
 
             # set max number of rows to 5
             n_rows = min(n_rows, 5)
@@ -471,17 +477,24 @@ class DataAssimilatorModule(pl.LightningModule):
             )
 
             # set all y-scales in first two columns to yscale
-            for i in range(n_rows):
+            # (except for the last row, which is the latent variable)
+            for i in range(n_rows - 1):
                 # set the x_scale in the third column to yscale
                 axs[i, 2].set_xscale(yscale)
                 for j in range(2):
                     axs[i, j].set_yscale(yscale)
 
+            # set ylim in last row to [-1.2,1.2]
+            axs[-1, 0].set_ylim([self.low_bound_latent-0.2, self.high_bound_latent+0.2])
+            axs[-1, 1].set_ylim(
+                [self.low_bound_latent - 0.2, self.high_bound_latent + 0.2]
+            )
+
             # master title
             fig.suptitle(
                 f"{tag} Trajectories for Index {idx} w/ Predicted Invariant Measure"
             )
-            for i in range(n_rows - 2):
+            for i in range(n_rows - 3):
                 ax = axs[i, 0]
                 # plot the assimilated state of the i'th observation
                 ax.plot(
@@ -606,11 +619,11 @@ class DataAssimilatorModule(pl.LightningModule):
                 #     )
                 #     ax.legend()
 
-            # plot the learned latent variables
+            # plot all assimilated/predicted variables in observation
             ax = axs[-2, 0]
             ax.plot(
                 times_idx,
-                x_assim_idx,
+                y_assim_idx,
                 ls="",
                 marker="x",
                 markersize=10,
@@ -619,7 +632,7 @@ class DataAssimilatorModule(pl.LightningModule):
             )
             ax.plot(
                 times_idx,
-                x_pred_idx,
+                y_pred_idx,
                 ls="",
                 marker="o",
                 markersize=10,
@@ -627,12 +640,12 @@ class DataAssimilatorModule(pl.LightningModule):
                 color="gray",
                 label="Prediction",
             )
-            ax.set_title(f"Learned Latent Variables")
+            ax.set_title(f"All learned observed variables")
 
             ax = axs[-2, 1]
             ax.plot(
                 times_idx[-20:],
-                x_assim_idx[-20:],
+                y_assim_idx[-20:],
                 ls="",
                 marker="x",
                 markersize=10,
@@ -641,7 +654,7 @@ class DataAssimilatorModule(pl.LightningModule):
             )
             ax.plot(
                 times_idx[-20:],
-                x_pred_idx[-20:],
+                y_pred_idx[-20:],
                 ls="",
                 marker="o",
                 markersize=10,
@@ -649,25 +662,71 @@ class DataAssimilatorModule(pl.LightningModule):
                 color="gray",
                 label="Prediction",
             )
-            ax.set_title(f"Learned Latent Variables")
+            ax.set_title(f"All learned observed variables")
 
-            # plot the true latent variables
+            # plot all assimilated/predicted variables in observation
+            D = self.dim_obs
             ax = axs[-1, 0]
             ax.plot(
-                times_idx, x_true_idx, linewidth=3, color="gray", label="Ground Truth"
+                times_idx,
+                x_assim_idx[:, D:],
+                ls="",
+                marker="x",
+                markersize=10,
+                color="gray",
+                label="Assimilated",
             )
-            ax.set_title(f"True Latent Variables")
-            ax.set_xlabel("Time")
+            ax.plot(
+                times_idx,
+                x_pred_idx[:, D:],
+                ls="",
+                marker="o",
+                markersize=10,
+                markerfacecolor="none",
+                color="gray",
+                label="Prediction",
+            )
+            ax.set_title(f"All learned latent variables")
 
             ax = axs[-1, 1]
             ax.plot(
                 times_idx[-20:],
-                x_true_idx[-20:],
+                x_assim_idx[-20:, D:],
+                ls="",
+                marker="x",
+                markersize=10,
+                color="gray",
+                label="Assimilated",
+            )
+            ax.plot(
+                times_idx[-20:],
+                x_pred_idx[-20:, D:],
+                ls="",
+                marker="o",
+                markersize=10,
+                markerfacecolor="none",
+                color="gray",
+                label="Prediction",
+            )
+            ax.set_title(f"All learned latent variables")
+
+            # plot the true latent variables
+            ax = axs[-3, 0]
+            ax.plot(
+                times_idx, y_true_idx, linewidth=3, color="gray", label="Ground Truth"
+            )
+            ax.set_title(f"True Observed Variables")
+            ax.set_xlabel("Time")
+
+            ax = axs[-3, 1]
+            ax.plot(
+                times_idx[-20:],
+                y_true_idx[-20:],
                 linewidth=3,
                 color="gray",
                 label="Ground Truth",
             )
-            ax.set_title(f"True Latent Variables")
+            ax.set_title(f"True Observed Variables")
             ax.set_xlabel("Time")
 
             plt.subplots_adjust(hspace=0.5)
