@@ -1,4 +1,5 @@
 for i in {0..5}
 do
-    nohup python -u run.py --run_id $i  > output_$i.log &
+    nohup python -u run.py --run_id $i --run_all 0 --project_name mdsine2_v3  > output_$i.log &
+    echo $! > save_pid_$i.txt
 done
