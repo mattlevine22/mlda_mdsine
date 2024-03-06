@@ -10,10 +10,10 @@ import argparse
 # use argparse to get command line argument for which experiment to run
 parser = argparse.ArgumentParser()
 parser.add_argument("--project_name", type=str, default="mdsine2_v2")
-parser.add_argument("--fast_dev_run", type=bool, default=False)
+parser.add_argument("--fast_dev_run", type=int, default=0)
 parser.add_argument("--accelerator", type=str, default="cpu")
 parser.add_argument("--devices", type=str, default="auto")
-parser.add_argument("--run_all", type=bool, default=True)
+parser.add_argument("--run_all", type=int, default=1)
 parser.add_argument("--run_id", type=int, default=0)
 args = parser.parse_args()
 
