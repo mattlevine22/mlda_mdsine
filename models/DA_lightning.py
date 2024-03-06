@@ -53,6 +53,9 @@ class DataAssimilatorModule(pl.LightningModule):
         low_bound_latent=0,
         high_bound_latent=1,
         num_hidden_layers=1,
+        include_control=True,
+        fully_connected=True,
+        shared_weights=False,
         learn_h=False,
         learn_ObsCov=False,
         learn_StateCov=False,
@@ -130,6 +133,9 @@ class DataAssimilatorModule(pl.LightningModule):
             layer_width=layer_width,
             dropout=dropout,
             activations=activation,
+            include_control=include_control,
+            fully_connected=fully_connected,
+            shared_weights=shared_weights,
             learn_h=learn_h,
             learn_ObsCov=learn_ObsCov,
             learn_StateCov=learn_StateCov,
@@ -508,22 +514,6 @@ class DataAssimilatorModule(pl.LightningModule):
             ax.legend()
             # set yscale to [-1.2,1.2] or
 
-            # Add shaded regions for percentile-based error bars
-            ax.fill_between(
-                times_idx,
-                error_percentiles[0],
-                error_percentiles[1],
-                color="blue",
-                alpha=0.2,
-            )
-            ax.fill_between(
-                times_idx,
-                error_percentiles_mcmc[0],
-                error_percentiles_mcmc[1],
-                color="black",
-                alpha=0.2,
-            )
-
             fig.suptitle(
                 "Log-Residuals for each patient\n E[log10(x_true(t)) - log10(x_sim(t))](t)"
             )
@@ -548,6 +538,33 @@ class DataAssimilatorModule(pl.LightningModule):
             )
             wandb.log({f"plots/{tag}/SummaryTraj_masked_{idx}": wandb.Image(fig2)})
 
+            plt.close("all")
+
+            # Make simpler plot with absolute values
+            plt.figure()
+            fig, ax = plt.subplots(
+                nrows=1,
+                ncols=1,
+            )
+            ax.plot(
+                times_idx,
+                np.abs(mean_error),
+                label="Mech + NN: Unmasked",
+                linestyle="-",
+            )
+            ax.plot(
+                times_idx,
+                np.abs(mean_error_mcmc),
+                label="Best pure mechanistic: Unmasked",
+                linestyle="-",
+            )
+            ax.set_xlabel("Time")
+            ax.legend()
+            fig.suptitle(
+                "Absolute Log-Residuals for each patient\n | E[log10(x_true(t)) - log10(x_sim(t))](t) |"
+            )
+            ax.set_ylim([0, 1.5])
+            wandb.log({f"plots/{tag}/SummaryTrajAbs_{idx}": wandb.Image(fig)})
             plt.close("all")
 
             # Plot Trajectories

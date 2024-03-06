@@ -40,6 +40,9 @@ class DataAssimilator(nn.Module):
         layer_width: int = 50,
         activations: int = "gelu",
         dropout: float = 0.01,
+        include_control: bool = True,
+        fully_connected: bool = True,
+        shared_weights: bool = False,
         normalizer: str = "MaxMinLog10Normalizer",
         normalization_stats=None,
     ):
@@ -71,6 +74,9 @@ class DataAssimilator(nn.Module):
             high_bound=high_bound,
             low_bound_latent=low_bound_latent,
             high_bound_latent=high_bound_latent,
+            include_control=include_control,
+            fully_connected=fully_connected,
+            shared_weights=shared_weights,
         )
 
         # initialize the observation map to be an unbiased identity map
@@ -412,6 +418,113 @@ class DataAssimilator(nn.Module):
         # return self.run_da(y_obs, times)
 
 
+# build a wrapper for FeedForwardNN that allows it to be applied to a batch of inputs of size 1 or act as a fully connected network
+class FeedForwardNN_Wrapper(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        output_size,
+        control_size=3,
+        num_hidden_layers=1,
+        layer_width=50,
+        activations="gelu",
+        dropout=0.01,
+        include_control=True,
+        fully_connected=False,
+        shared_weights=False,
+    ):
+        super(FeedForwardNN_Wrapper, self).__init__()
+        self.fully_connected = fully_connected
+        self.shared_weights = shared_weights
+        self.include_control = include_control
+
+        # Adjust for control inputs
+        if fully_connected:
+            inner_input_size = input_size
+            inner_output_size = output_size
+        else:
+            inner_input_size = 1
+            inner_output_size = 1
+
+        if include_control:
+            inner_input_size += control_size
+
+        # Initialize the network based on the configuration
+        if fully_connected or shared_weights:
+            self.net = FeedForwardNN(
+                inner_input_size,
+                inner_output_size,
+                num_hidden_layers,
+                layer_width,
+                activations,
+                dropout,
+            )
+        else:
+            self.net_list = nn.ModuleList(
+                [
+                    FeedForwardNN(
+                        inner_input_size,
+                        inner_output_size,
+                        num_hidden_layers,
+                        layer_width,
+                        activations,
+                        dropout,
+                    )
+                    for _ in range(input_size)
+                ]
+            )
+
+    def forward(self, x, u):
+        '''
+
+        INPUTS:
+           x: (N_batch, input_size)
+           u: (N_batch, control_size)
+
+        OUTPUTS:
+            output: (N_batch, input_size)
+           '''
+        if self.fully_connected:
+            # Concatenate control inputs if required
+            xu = (
+                torch.cat((x, u), dim=1)
+                if self.include_control and u is not None
+                else x
+            )
+            return self.net(xu)
+        else:
+            if self.shared_weights:
+                u_expanded = u.unsqueeze(1).expand(-1, x.size(1), -1)
+
+                # concatenate control inputs if required
+                # should result in shape (N_batch, input_size, control_size + 1)
+                xu = (
+                    torch.cat((x.unsqueeze(2), u_expanded), dim=2)
+                    if self.include_control and u is not None
+                    else x.unsqueeze(2)
+                )
+                return self.net(xu).squeeze(2)
+
+            # Apply the same net to each input, assuming x has shape [batch_size, input_size]
+            # and u has shape [batch_size, control_size] if included
+            outputs = []
+            for i in range(
+                x.shape[1]
+            ):  # Iterate over the second dimension (input_size)
+                xi = x[:, i].unsqueeze(1)  # Reshape for individual input
+                xu = (
+                    torch.cat((xi, u), dim=1)
+                    if self.include_control and u is not None
+                    else xi
+                )
+                if self.shared_weights:
+                    output = self.net(xu)
+                else:
+                    output = self.net_list[i](xu)
+                outputs.append(output)
+
+            return torch.cat(outputs, dim=1)
+
 class FeedForwardNN(nn.Module):
     def __init__(
         self,
@@ -455,7 +568,6 @@ class FeedForwardNN(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
 class F_Physics(nn.Module):
     def __init__(self, ode=None, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -485,6 +597,9 @@ class HybridODE(nn.Module):
         low_bound_latent=0,
         high_bound_latent=1,
         nn_coefficient_scaling=1e3,
+        include_control: bool = True,
+        fully_connected: bool = True,
+        shared_weights: bool = False,
     ):
         super(HybridODE, self).__init__()
         self.use_physics = use_physics
@@ -504,13 +619,17 @@ class HybridODE(nn.Module):
             print(
                 "Warning: hard-coded 3 control categories (binary) to be appended to NN state input. Also assuming synchronous control times across subjects."
             )
-            self.f_nn = FeedForwardNN(
-                dim_state + 3,
+            self.f_nn = FeedForwardNN_Wrapper(
                 dim_state,
+                dim_state,
+                3, # hard-coding control-size of 3
                 num_hidden_layers,
                 layer_width,
                 activations,
                 dropout,
+                include_control,
+                fully_connected,
+                shared_weights,
             )
 
     def forward(self, t, x):
@@ -563,9 +682,8 @@ class HybridODE(nn.Module):
             # concatenate one-hot control to x_scaled and pass through NN
             # x_scaled: (N_batch, dim_state)
             # one_hot_control: (dim_control)
-            x_and_control = torch.cat((x_scaled, one_hot_control), dim=1)
 
-            nn_raw = self.f_nn(x_and_control)
+            nn_raw = self.f_nn(x_scaled, one_hot_control)
             # nn_raw = torch.tanh(self.f_nn(x)) # this asks nn output to be in range -1 to 1
 
             # sign(nn) * (10^|nn| - 1)

@@ -9,7 +9,7 @@ import argparse
 
 # use argparse to get command line argument for which experiment to run
 parser = argparse.ArgumentParser()
-parser.add_argument("--project_name", type=str, default="mdsine2")
+parser.add_argument("--project_name", type=str, default="mdsine2_v2")
 parser.add_argument("--fast_dev_run", type=bool, default=False)
 parser.add_argument("--accelerator", type=str, default="cpu")
 parser.add_argument("--devices", type=str, default="auto")
@@ -24,13 +24,19 @@ exp_dict = {
     "accelerator": [args.accelerator],
     "devices": [args.devices],
     "normalizer": ["max_min_log10"],
-    "loss_name": ["mse"], #["mse"],
-    "low_bound": [0], # lowest allowable value of state variables in ODE 
-    "high_bound": [1e12], # highest allowable value of state variables in ODE
+    "loss_name": ["mse"],  # ["mse"],
+    "dim_state": [141],  # default is [141] (no latent),
+    "low_bound": [0],  # lowest allowable value of state variables in ODE
+    "high_bound": [1e12],  # highest allowable value of state variables in ODE
+    "low_bound_latent": [0], # lowest allowable value of latent variables in ODE
+    "high_bound_latent": [1], # highest allowable value of latent variables in ODE
+    "include_control": [True, False],
+    "fully_connected": [True, False],
+    "shared_weights": [True],
     "T_long": [10],
     "use_physics": [True],
     "use_nn": [True],
-    "nn_coefficient_scaling": ['x'],
+    "nn_coefficient_scaling": ["x"],
     "learning_rate": [1e-3],
     "layer_width": [600],
     "num_hidden_layers": [4],
@@ -53,5 +59,5 @@ else:
     id_list = [args.run_id]
 
 for i in id_list:
-    print("Running experiment ", i)
+    print("Running experiment ", i, " of ", len(exp_list))
     Runner(**exp_list[i])
