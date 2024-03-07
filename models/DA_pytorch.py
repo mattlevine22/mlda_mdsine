@@ -32,6 +32,7 @@ class DataAssimilator(nn.Module):
         use_physics: bool = False,
         use_nn: bool = True,
         nn_coefficient_scaling: float = 1e3,
+        pre_multiply_x: bool = True,
         low_bound: float = 1e5,
         high_bound: float = 1e12,
         low_bound_latent: float = 0,
@@ -70,6 +71,7 @@ class DataAssimilator(nn.Module):
             activations,
             dropout,
             nn_coefficient_scaling=nn_coefficient_scaling,
+            pre_multiply_x=pre_multiply_x,
             low_bound=low_bound,
             high_bound=high_bound,
             low_bound_latent=low_bound_latent,
@@ -597,6 +599,7 @@ class HybridODE(nn.Module):
         low_bound_latent=0,
         high_bound_latent=1,
         nn_coefficient_scaling=1e3,
+        pre_multiply_x: bool = True,
         include_control: bool = True,
         fully_connected: bool = True,
         shared_weights: bool = False,
@@ -610,6 +613,9 @@ class HybridODE(nn.Module):
         self.low_bound_latent = low_bound_latent
         self.high_bound_latent = high_bound_latent
         self.nn_coefficient_scaling = nn_coefficient_scaling
+        self.pre_multiply_x = pre_multiply_x
+        # nn_coefficient_scaling is a scaling factor for the output of the neural network
+        # it is only active if pre_multiply_x is False
 
         self.mech_ode = ode
         if self.use_physics:
@@ -696,7 +702,11 @@ class HybridODE(nn.Module):
             add_term = torch.zeros_like(x, requires_grad=True).to(x)
 
             # in the observed components of x, do x*NN, else do NN
-            add_term = torch.cat((x[:, :D] * nn_scaled[:, :D], nn_scaled[:, D:]), dim=1)
+            if self.pre_multiply_x:
+                add_term = torch.cat((x[:, :D] * nn_scaled[:, :D], nn_scaled[:, D:]), dim=1)
+            else:
+                # Note that this will work poorly if hidden dims are constrained to be small!
+                add_term = self.nn_coefficient_scaling * nn_scaled
 
             # print ratio of nn to physics
             # print("nn / physics: ", torch.mean(torch.abs(add_term / rhs)))
