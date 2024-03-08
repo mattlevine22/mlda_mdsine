@@ -1,7 +1,9 @@
 import os
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.utils.parametrize as parametrize
+from models.strNN import StrNN
 from utils import get_activation, odeint_wrapper, Symmetric, MatrixExponential
 from utils import batch_covariance
 from utils import load_normalizer_class
@@ -462,18 +464,28 @@ class FeedForwardNN_Wrapper(nn.Module):
                 dropout,
             )
         else:
-            self.net_list = nn.ModuleList(
-                [
-                    FeedForwardNN(
-                        inner_input_size,
-                        inner_output_size,
-                        num_hidden_layers,
-                        layer_width,
-                        activations,
-                        dropout,
-                    )
-                    for _ in range(input_size)
-                ]
+            total_input_size = input_size
+            if include_control:
+                total_input_size += control_size
+
+            # create an adjacency matrix for the network
+            # it should only allow the i'th input to connect to the i'th output
+            # if include control, then the control inputs (which are concatenated to the end of the state vector) SHOULD connect to the output.
+            # nout x nin
+            adjacency = np.zeros((output_size, total_input_size))
+            for i in range(output_size):
+                adjacency[i, i] = 1
+                if include_control:
+                    # include the last control_size columns
+                    adjacency[i, -control_size:] = 1
+
+            self.net = StrNN(
+                nin=total_input_size,
+                nout=output_size,
+                hidden_sizes=[layer_width] * num_hidden_layers,
+                activation=activations,
+                ian_init=False,
+                adjacency=adjacency,
             )
 
     def forward(self, x, u):
@@ -506,26 +518,13 @@ class FeedForwardNN_Wrapper(nn.Module):
                     else x.unsqueeze(2)
                 )
                 return self.net(xu).squeeze(2)
-
-            # Apply the same net to each input, assuming x has shape [batch_size, input_size]
-            # and u has shape [batch_size, control_size] if included
-            outputs = []
-            for i in range(
-                x.shape[1]
-            ):  # Iterate over the second dimension (input_size)
-                xi = x[:, i].unsqueeze(1)  # Reshape for individual input
+            else:
                 xu = (
-                    torch.cat((xi, u), dim=1)
+                    torch.cat((x, u), dim=1)
                     if self.include_control and u is not None
-                    else xi
+                    else x
                 )
-                if self.shared_weights:
-                    output = self.net(xu)
-                else:
-                    output = self.net_list[i](xu)
-                outputs.append(output)
-
-            return torch.cat(outputs, dim=1)
+                return self.net(xu)
 
 class FeedForwardNN(nn.Module):
     def __init__(
