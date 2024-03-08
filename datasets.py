@@ -74,7 +74,7 @@ class DynSys(object):
 class GeneralizedLotkaVolterra(DynSys):
     def __init__(
         self,
-        patient_id="2",  # only used to choose which mechanistic parameter set is best (also loads perturbations, but these are the same across patients currently)
+        patient_id=["2","3"],  # only used to choose which mechanistic parameter set is best (also loads perturbations, but these are the same across patients currently)
         param_dir=PARAM_DIR,
     ):
         super(GeneralizedLotkaVolterra, self).__init__()
@@ -88,10 +88,10 @@ class GeneralizedLotkaVolterra(DynSys):
 
         # load perturbations for single patient (same for all subjects so far)
         # Todo: will need to deal with this when we have different perturbations for different subjects
-        self.perturbations, self.times = data.load_perturbations(patient_id=patient_id)
+        self.perturbations, self.times = data.load_perturbations(patient_id=patient_id[0])
 
-        idx, _, _, _ = data.get_best_sim(patient_id=patient_id)
-        self.load_params_from_file(idx)
+        self.best_sim_idx = data.get_best_sim(patient_id)
+        self.load_params_from_file(self.best_sim_idx)
 
     def load_params_from_file(self, iter=-1):
         print("Loading parameters from file")
@@ -152,8 +152,13 @@ class MDData(object):
         self.limit_of_detection = 1e5
         self.best_mcmc_sims = {}  # New attribute to store best sims
 
-    def load_best_mcmc_simulation(self, patient_id):
-        _, best_sim, _, _ = self.get_best_sim(patient_id)
+    def load_best_mcmc_simulation(self, patient_id, ref_patient_ids):
+        idx = self.get_best_sim(ref_patient_ids)
+
+        # Load the idx simulation for the current patient
+        sims = np.load(f"{self.sims_name}/subject{patient_id}.npy")
+        best_sim = sims[idx]
+
         # Assuming best_sim is a numpy array; convert it to a tensor
         best_sim_tensor = torch.from_numpy(best_sim).float().T
         return best_sim_tensor
@@ -184,34 +189,52 @@ class MDData(object):
             self.times[key] = (t_start, t_end)
         return df, self.times
 
-    def get_best_sim(self, patient_id="2"):
-        # load the mcmc sims
-        sims = np.load(f"{self.sims_name}/subject{patient_id}.npy")
-        sim_times = np.load(f"{self.sims_name}/subject{patient_id}_times.npy")
-        iters = np.load(f"{self.sims_name}/subject{patient_id}_indices.npy")
-        # sims is (n_mcmc_iters, n_states, )
+    def get_best_sim(self, patient_ids):
+        """
+        Find the simulation index that yields the best total MSE across the data from all specified patient IDs.
 
-        # threshold the solution to the limit of detection
-        sims[sims < self.limit_of_detection] = self.limit_of_detection
+        Args:
+        patient_ids (list of str): List of patient IDs.
 
-        # get the patient data
-        _, x, mask = self.get_patient(patient_id)
+        Returns:
+        tuple: A tuple containing the best simulation index, the best simulation data, simulation times, and observed data.
+        """
 
-        my_eps = 1e-16
-        log_sims = np.log10(sims + my_eps)
-        log_x = np.log10(x.numpy() + my_eps)
-        # compute MSE between x and each sim
-        mse = np.mean((log_sims - log_x) ** 2, axis=(1, 2))
+        # backwards compatibility: if patient_ids is a string, convert it to a list
+        if not isinstance(patient_ids, list):
+            patient_ids = [patient_ids]
 
-        # identify index of best sim
-        ind = int(np.argmin(mse))
-        # print("best sample index", ind)
+        total_mse = 0
+        for patient_id in patient_ids:
+            # Load the simulations for the current patient
+            sims = np.load(f"{self.sims_name}/subject{patient_id}.npy")
+            sim_times = np.load(f"{self.sims_name}/subject{patient_id}_times.npy")
+            iters = np.load(f"{self.sims_name}/subject{patient_id}_indices.npy")
 
-        best_sim_idx = iters[ind]
-        best_sim = sims[ind]
-        # print("best MCMC index", best_sim_idx)
+            # Threshold the solution to the limit of detection
+            sims[sims < self.limit_of_detection] = self.limit_of_detection
 
-        return best_sim_idx, best_sim, sim_times, x.numpy()
+            # Get the patient data
+            _, x, mask = self.get_patient(patient_id)
+
+            # Compute log scales to handle orders of magnitude
+            my_eps = 1e-16
+            log_sims = np.log10(sims + my_eps)
+            log_x = np.log10(x.numpy() + my_eps)
+
+            # Compute MSE between x and each simulation
+            mse = np.mean((log_sims - log_x) ** 2, axis=(1, 2))
+
+            # Aggregate MSEs
+            total_mse += mse
+
+        # After aggregating MSEs for all patients, identify the best simulation index
+        best_sim_idx = int(np.argmin(total_mse))
+        best_sim = sims[best_sim_idx]
+
+        print(f"Best simulation index: {best_sim_idx}")
+
+        return best_sim_idx
 
 
 class MDDataset(Dataset):
@@ -220,6 +243,9 @@ class MDDataset(Dataset):
         self.data = MDData()  # Assuming MDData class is defined in a previous cell
         self.invariant_stats_true = []
         self.compute_invariant_stats()
+
+        # define the reference patient IDs with which we will use to define the best MCMC simulations.
+        self.ref_patient_ids = ["2", "3"]
 
     def __len__(self):
         return len(self.patients)
@@ -263,7 +289,7 @@ class MDDataset(Dataset):
 
         if patient_id not in self.data.best_mcmc_sims:
             self.data.best_mcmc_sims[patient_id] = self.data.load_best_mcmc_simulation(
-                patient_id
+                patient_id, self.ref_patient_ids
             )
 
         best_mcmc_sim_batch = self.data.best_mcmc_sims[patient_id]
