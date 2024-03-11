@@ -30,15 +30,16 @@ exp_dict = {
     "high_bound": [1e12],  # highest allowable value of state variables in ODE
     "low_bound_latent": [0], # lowest allowable value of latent variables in ODE
     "high_bound_latent": [1], # highest allowable value of latent variables in ODE
-    "include_control": [False],
-    "fully_connected": [True],
-    "shared_weights": [True],
+    "include_control": [True],
+    "fully_connected": [False],
+    "shared_weights": [False],
     "T_long": [10],
     "use_physics": [True],
-    "use_nn": [True],
-    "nn_coefficient_scaling": [1e2, 1e3, 1e4, 1e5],
-    "pre_multiply_x": [False],
-    "learning_rate": [1e-3],
+    "learn_physics": [True],
+    "use_nn": [False],
+    "nn_coefficient_scaling": ["x"],
+    "pre_multiply_x": [True],
+    "learning_rate": [1, 1e-1, 1e-2],
     "layer_width": [600],
     "num_hidden_layers": [4],
     "max_epochs": [30],

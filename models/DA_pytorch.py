@@ -32,6 +32,7 @@ class DataAssimilator(nn.Module):
             "options": {"dtype": torch.float32},
         },
         use_physics: bool = False,
+        learn_physics: bool = False,
         use_nn: bool = True,
         nn_coefficient_scaling: float = 1e3,
         pre_multiply_x: bool = True,
@@ -81,6 +82,7 @@ class DataAssimilator(nn.Module):
             include_control=include_control,
             fully_connected=fully_connected,
             shared_weights=shared_weights,
+            learn_physics=learn_physics,
         )
 
         # initialize the observation map to be an unbiased identity map
@@ -582,6 +584,7 @@ class F_Physics(nn.Module):
 # Define a class for the learned ODE model
 # This has a forward method to represent a RHS of an ODE, where rhs = f_physics + f_nn
 class HybridODE(nn.Module):
+
     def __init__(
         self,
         dim_state,
@@ -602,6 +605,7 @@ class HybridODE(nn.Module):
         include_control: bool = True,
         fully_connected: bool = True,
         shared_weights: bool = False,
+        learn_physics: bool = False,
     ):
         super(HybridODE, self).__init__()
         self.use_physics = use_physics
@@ -617,8 +621,13 @@ class HybridODE(nn.Module):
         # it is only active if pre_multiply_x is False
 
         self.mech_ode = ode
-        if self.use_physics:
-            self.f_physics = F_Physics(ode)
+
+        # ensure that use_physics is True if learn_physics is True
+        if learn_physics:
+            assert use_physics
+            # set requires_grad to True for all parameters in the ODE
+            # self.mech_ode.A.requires_grad = True
+            self.mech_ode.r.requires_grad = True
 
         if self.use_nn:
             print(

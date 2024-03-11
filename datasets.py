@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchdiffeq import odeint
 import pytorch_lightning as pl
@@ -37,8 +38,9 @@ def load_dyn_sys_class(dataset_name):
         raise ValueError(f"Dataset class '{dataset_name}' not found.")
 
 
-class DynSys(object):
+class DynSys(nn.Module):
     def __init__(self, state_dim=1, obs_noise_std=1, obs_inds=[0]):
+        super(DynSys, self).__init__()
         self.state_dim = state_dim
         self.obs_noise_std = obs_noise_std
         self.obs_inds = obs_inds
@@ -105,9 +107,9 @@ class GeneralizedLotkaVolterra(DynSys):
 
         self.state_dim = interactions.shape[0]
 
-        # load as float tensors
-        self.r = torch.from_numpy(growth).float()
-        self.A = torch.from_numpy(interactions).float()
+        # load as float tensors (allow them to be parameters, but default to not requiring gradients)
+        self.r = nn.Parameter(torch.from_numpy(growth).float(), requires_grad=False)
+        self.A = nn.Parameter(torch.from_numpy(interactions).float(), requires_grad=False)
         self.pert_params = {
             k: torch.from_numpy(v[iter]).float() for k, v in pert_params.items()
         }
