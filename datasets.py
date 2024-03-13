@@ -78,6 +78,7 @@ class GeneralizedLotkaVolterra(DynSys):
         self,
         patient_id=["2","3"],  # only used to choose which mechanistic parameter set is best (also loads perturbations, but these are the same across patients currently)
         param_dir=PARAM_DIR,
+        positive_growth_rate=True,
     ):
         super(GeneralizedLotkaVolterra, self).__init__()
 
@@ -87,6 +88,7 @@ class GeneralizedLotkaVolterra(DynSys):
         self.param_dir = param_dir
         self.threshold = 1e15
         self.close_to_zero = 1e-2
+        self.positive_growth_rate = positive_growth_rate
 
         # load perturbations for single patient (same for all subjects so far)
         # Todo: will need to deal with this when we have different perturbations for different subjects
@@ -96,7 +98,7 @@ class GeneralizedLotkaVolterra(DynSys):
         self.load_params_from_file(self.best_sim_idx)
 
     def load_params_from_file(self, iter=-1):
-        print("Loading parameters from file")
+        print("Loading parameters from file using iteration: ", iter)
 
         interactions = np.load(self.param_dir + "interactions.npy")
         print("Number of MCMC iterations: ", interactions.shape[0])
@@ -142,7 +144,12 @@ class GeneralizedLotkaVolterra(DynSys):
         # A: (N_states, N_states)
         # perturb: (N_batch, N_states)
         # dx: (N_batch, N_states)
-        dx = x * (self.r * (1 + perturb) + torch.matmul(self.A, x.T).T)
+        if self.positive_growth_rate:
+            # relu is used to ensure growth rates are non-negative
+            r = nn.functional.relu(self.r)
+        else:
+            r = self.r
+        dx = x * (r * (1 + perturb) + torch.matmul(self.A, x.T).T)
         return dx
 
 

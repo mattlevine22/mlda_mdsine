@@ -50,6 +50,7 @@ class Runner:
         obs_inds=[i for i in range(0, 141, 1)],
         use_physics=True,
         learn_physics=False,
+        positive_growth_rate=False,
         use_nn=True,
         low_bound=1e5,
         high_bound=1e12,
@@ -120,6 +121,7 @@ class Runner:
             "dim_obs": len(obs_inds),
             "use_physics": use_physics,
             "learn_physics": learn_physics,
+            "positive_growth_rate": positive_growth_rate,
             "use_nn": use_nn,
             "nn_coefficient_scaling": nn_coefficient_scaling,
             "pre_multiply_x": pre_multiply_x,
@@ -194,7 +196,7 @@ class Runner:
         # Load the true ODE
         self.model_hyperparams["ode"] = load_dyn_sys_class(
             self.data_hyperparams["dyn_sys_name"]
-        )()
+        )(positive_growth_rate=self.model_hyperparams["positive_growth_rate"])
 
         # add normalization_stats to model_hyperparams
         datamodule.setup("fit")
@@ -283,3 +285,6 @@ class Runner:
 
         # Test the model
         trainer.test(model, datamodule=datamodule)
+
+        # print final value of growth rate
+        print("Final growth rate: ", model.model.rhs.mech_ode.r)
