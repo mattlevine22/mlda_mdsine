@@ -2,7 +2,7 @@
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import LearningRateMonitor, EarlyStopping
+from pytorch_lightning.callbacks import LearningRateMonitor, EarlyStopping, ModelCheckpoint
 import wandb
 from pytorch_lightning.tuner import Tuner
 
@@ -21,8 +21,10 @@ from pdb import set_trace as bp
 
 
 class Runner:
+
     def __init__(
         self,
+        checkpoint_init=(),
         seed=0,
         fast_dev_run=False,
         accelerator="auto",
@@ -46,21 +48,25 @@ class Runner:
         loss_name="mse",
         lr_scheduler_params={"patience": 5, "factor": 0.1},
         tune_initial_lr=False,
-        dim_state=141,
+        dim_state_mech=141,
+        dim_state_latent=0,
         obs_inds=[i for i in range(0, 141, 1)],
         use_physics=True,
+        use_nn_markovian=False,
+        use_nn_non_markovian=False,
         learn_physics=False,
+        learn_nn_markovian=False,
+        learn_nn_non_markovian=False,
+        learn_h=False,
+        learn_ObsCov=False,
+        learn_StateCov=False,
         positive_growth_rate=False,
-        use_nn=True,
         low_bound=1e5,
         high_bound=1e12,
         low_bound_latent=0,
         high_bound_latent=1,
         nn_coefficient_scaling=1e3,
         pre_multiply_x=True,
-        learn_h=False,
-        learn_ObsCov=False,
-        learn_StateCov=False,
         da_name="none",
         N_ensemble=30,
         odeint_use_adjoint=False,
@@ -117,21 +123,25 @@ class Runner:
             "monitor_metric": monitor_metric,
             "loss_name": loss_name,
             "lr_scheduler_params": lr_scheduler_params,
-            "dim_state": dim_state,
+            "dim_state_mech": dim_state_mech,
+            "dim_state_latent": dim_state_latent,
             "dim_obs": len(obs_inds),
-            "use_physics": use_physics,
-            "learn_physics": learn_physics,
             "positive_growth_rate": positive_growth_rate,
-            "use_nn": use_nn,
+            "learn_physics": learn_physics,
+            "learn_nn_markovian": learn_nn_markovian,
+            "learn_nn_non_markovian": learn_nn_non_markovian,
+            "learn_h": learn_h,
+            "learn_ObsCov": learn_ObsCov,
+            "learn_StateCov": learn_StateCov,
+            "use_physics": use_physics,
+            "use_nn_markovian": use_nn_markovian,
+            "use_nn_non_markovian": use_nn_non_markovian,
             "nn_coefficient_scaling": nn_coefficient_scaling,
             "pre_multiply_x": pre_multiply_x,
             "low_bound": low_bound,
             "high_bound": high_bound,
             "low_bound_latent": low_bound_latent,
             "high_bound_latent": high_bound_latent,
-            "learn_h": learn_h,
-            "learn_ObsCov": learn_ObsCov,
-            "learn_StateCov": learn_StateCov,
             "da_name": da_name,
             "N_ensemble": N_ensemble,
             "layer_width": layer_width,
@@ -172,6 +182,7 @@ class Runner:
             "seed": seed,
             "tune_initial_lr": tune_initial_lr,
             "accelerator": accelerator,
+            "checkpoint_init": checkpoint_init,
         }
 
         self.run()
@@ -205,7 +216,18 @@ class Runner:
         ] = datamodule.train.normalization_stats
 
         # Initialize the model
-        model = DataAssimilatorModule(**self.model_hyperparams)
+        if len(self.other_hyperparams["checkpoint_init"]) == 0:
+            print("No checkpoint init...loading model from scratch")
+            model = DataAssimilatorModule(**self.model_hyperparams)
+        elif len(self.other_hyperparams["checkpoint_init"]) == 2:
+            # format is (interpretable_name, path)
+            print("Loading model from checkpoint")
+            model = DataAssimilatorModule.load_from_checkpoint(
+                self.other_hyperparams["checkpoint_init"][1],
+                **self.model_hyperparams,
+            )
+        else:
+            raise ValueError("Only one checkpoint can be loaded")
 
         # Set callbacks for trainer (lr monitor, early stopping)
 
@@ -221,8 +243,14 @@ class Runner:
             verbose=True,
         )
 
+        # Create a model checkpoint callback
+        checkpoint_callback = ModelCheckpoint(
+            monitor=self.model_hyperparams["monitor_metric"],
+            save_last=True,
+        )
+
         # aggregate all callbacks
-        callbacks = [lr_monitor, early_stopping]
+        callbacks = [lr_monitor, early_stopping, checkpoint_callback]
 
         # Initialize the trainer
         trainer = Trainer(

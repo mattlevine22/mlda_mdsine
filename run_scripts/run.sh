@@ -1,4 +1,1 @@
-for i in {0..3}
-do
-    nohup python -u run.py --run_id $i  > output_$i.log &
-done
+nohup python -u run.py --run_id 0 --run_all 0 --project_name mdsine2_v5  > output_mech$i.log &

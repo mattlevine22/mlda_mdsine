@@ -14,15 +14,14 @@ torch.autograd.set_detect_anomaly(True)
 
 
 class DataAssimilator(nn.Module):
+
     def __init__(
         self,
-        dim_state: int,
+        dim_state_mech: int,
+        dim_state_latent: int,
         dim_obs: int,
         da_name: str = "3dvar",  # "enkf" or "3dvar"
         N_ensemble: int = 10,
-        learn_h: bool = False,
-        learn_ObsCov: bool = False,
-        learn_StateCov: bool = False,
         ode: object = None,
         odeint_params: dict = {
             "use_adjoint": False,
@@ -32,8 +31,16 @@ class DataAssimilator(nn.Module):
             "options": {"dtype": torch.float32},
         },
         use_physics: bool = False,
+        use_nn_markovian: bool = True,
+        use_nn_non_markovian: bool = False,
         learn_physics: bool = False,
-        use_nn: bool = True,
+        learn_nn_markovian: bool = False,
+        learn_nn_non_markovian: bool = False,
+        learn_h: bool = False,
+        learn_ObsCov: bool = False,
+        learn_StateCov: bool = False,
+        learn_prior_mean: bool = False,
+        learn_prior_cov: bool = False,
         nn_coefficient_scaling: float = 1e3,
         pre_multiply_x: bool = True,
         low_bound: float = 1e5,
@@ -57,6 +64,7 @@ class DataAssimilator(nn.Module):
             normalization_stats=normalization_stats
         )
 
+        dim_state = dim_state_mech + dim_state_latent
         self.da_name = da_name
         self.N_ensemble = N_ensemble
         self.dim_state = dim_state
@@ -64,15 +72,17 @@ class DataAssimilator(nn.Module):
         self.odeint_params = odeint_params
 
         self.rhs = HybridODE(
-            dim_state,
-            self.normalizer,
-            ode,
-            use_physics,
-            use_nn,
-            num_hidden_layers,
-            layer_width,
-            activations,
-            dropout,
+            dim_state_mech=dim_state_mech,
+            dim_state_latent=dim_state_latent,
+            normalizer=self.normalizer,
+            ode=ode,
+            use_physics=use_physics,
+            use_nn_markovian=use_nn_markovian,
+            use_nn_non_markovian=use_nn_non_markovian,
+            num_hidden_layers=num_hidden_layers,
+            layer_width=layer_width,
+            activations=activations,
+            dropout=dropout,
             nn_coefficient_scaling=nn_coefficient_scaling,
             pre_multiply_x=pre_multiply_x,
             low_bound=low_bound,
@@ -82,7 +92,6 @@ class DataAssimilator(nn.Module):
             include_control=include_control,
             fully_connected=fully_connected,
             shared_weights=shared_weights,
-            learn_physics=learn_physics,
         )
 
         # initialize the observation map to be an unbiased identity map
@@ -90,11 +99,6 @@ class DataAssimilator(nn.Module):
         # set to identity of shape (dim_obs, dim_state)
         self.h_obs.weight.data = torch.eye(dim_obs, dim_state)
         self.h_obs.bias.data = torch.zeros(dim_obs)
-        if not learn_h:
-            print("Not learning h")
-            # freeze the observation map
-            for param in self.h_obs.parameters():
-                param.requires_grad = False
 
         self.Gamma_cov = nn.Linear(dim_obs, dim_obs, bias=False)
         if learn_ObsCov:
@@ -107,11 +111,7 @@ class DataAssimilator(nn.Module):
                 self.Gamma_cov, "weight", MatrixExponential()
             )
         else:
-            print("Not learning Gamma")
             self.Gamma_cov.weight.data = torch.eye(dim_obs, dim_obs)
-            # freeze the observation noise covariance
-            for param in self.Gamma_cov.parameters():
-                param.requires_grad = False
 
         print("Initial Gamma_cov: ", self.Gamma_cov.weight.data)
 
@@ -126,11 +126,7 @@ class DataAssimilator(nn.Module):
                 self.C_cov, "weight", MatrixExponential()
             )
         else:
-            print("Not learning C")
             self.C_cov.weight.data = torch.eye(dim_state, dim_state)
-            # freeze the state noise covariance
-            for param in self.C_cov.parameters():
-                param.requires_grad = False
 
         print("Initial C_cov: ", self.C_cov.weight.data)
 
@@ -148,6 +144,7 @@ class DataAssimilator(nn.Module):
         # set an initial condition for the state and register it as a buffer
         # note that this is better than self.x0 = x0 because pytorch-lightning will manage the device
         # so you don't have to do .to(device) every time you use it
+        # Note: this initial condition gets learned under 3dvar or enkf but not under no_assim
         self.register_buffer("x0", torch.zeros(dim_state, requires_grad=True))
 
         # create a learnable prior mean and covariance to draw EnKF ensemble members from
@@ -160,6 +157,48 @@ class DataAssimilator(nn.Module):
         parametrize.register_parametrization(
             self.prior_cov, "weight", MatrixExponential()
         )
+
+        # set learnability of parameters
+        self.set_learnability(
+            learn_prior_mean, learn_prior_cov,learn_h, learn_ObsCov, learn_StateCov,
+            learn_physics, learn_nn_markovian, learn_nn_non_markovian)
+
+    def set_learnability(
+        self,
+        learn_prior_mean,
+        learn_prior_cov,
+        learn_h,
+        learn_ObsCov,
+        learn_StateCov,
+        learn_physics,
+        learn_nn_markovian,
+        learn_nn_non_markovian,
+    ):
+
+        self.prior_mean.requires_grad = learn_prior_mean
+        for param in self.prior_cov.parameters():
+            param.requires_grad = learn_prior_cov
+        for param in self.h_obs.parameters():
+            param.requires_grad = learn_h
+        for param in self.Gamma_cov.parameters():
+            param.requires_grad = learn_ObsCov
+        for param in self.C_cov.parameters():
+            param.requires_grad = learn_StateCov
+        for param in self.rhs.f_nn_markovian.parameters():
+            param.requires_grad = learn_nn_markovian
+        for param in self.rhs.f_nn_non_markovian.parameters():
+            param.requires_grad = learn_nn_non_markovian
+
+        # set learnablility of physics
+        # for param in self.mech_ode.r.parameters():
+        #     param.requires_grad = learn_physics
+        if learn_physics:
+            print("Warning: only learning the r parameter in the ODE (growth rate).")
+            self.rhs.mech_ode.r.requires_grad = True
+
+        # set learnability of scale parameters
+        self.Gamma_scale.requires_grad = learn_ObsCov
+        self.C_scale.requires_grad = learn_StateCov
 
     def solve(self, x0, t, controls=None, params={}):
         # solve the ODE using the initial conditions x0 and time points t
@@ -587,11 +626,13 @@ class HybridODE(nn.Module):
 
     def __init__(
         self,
-        dim_state,
-        normalizer,
+        dim_state_mech: int = 10, # mechanistic state dimension
+        dim_state_latent: int = 0, # latent state dimension
+        normalizer: object = None,
         ode: object = None,
         use_physics: bool = False,
-        use_nn: bool = True,
+        use_nn_markovian: bool = True,
+        use_nn_non_markovian: bool = False,
         num_hidden_layers=1,
         layer_width=50,
         activations="gelu",
@@ -605,11 +646,11 @@ class HybridODE(nn.Module):
         include_control: bool = True,
         fully_connected: bool = True,
         shared_weights: bool = False,
-        learn_physics: bool = False,
     ):
         super(HybridODE, self).__init__()
         self.use_physics = use_physics
-        self.use_nn = use_nn
+        self.use_nn_markovian = use_nn_markovian
+        self.use_nn_non_markovian = use_nn_non_markovian
         self.normalizer = normalizer
         self.low_bound = low_bound
         self.high_bound = high_bound
@@ -617,41 +658,51 @@ class HybridODE(nn.Module):
         self.high_bound_latent = high_bound_latent
         self.nn_coefficient_scaling = nn_coefficient_scaling
         self.pre_multiply_x = pre_multiply_x
+
+        self.dim_state_mech = dim_state_mech
+        self.dim_state_latent = dim_state_latent
         # nn_coefficient_scaling is a scaling factor for the output of the neural network
         # it is only active if pre_multiply_x is False
 
         self.mech_ode = ode
 
-        # ensure that use_physics is True if learn_physics is True
-        if learn_physics:
-            assert use_physics
-            # set requires_grad to True for all parameters in the ODE
-            # self.mech_ode.A.requires_grad = True
-            self.mech_ode.r.requires_grad = True
+        # always build the NNs, but only use them if use_nn is True
 
-        if self.use_nn:
-            print(
-                "Warning: hard-coded 3 control categories (binary) to be appended to NN state input. Also assuming synchronous control times across subjects."
-            )
-            self.f_nn = FeedForwardNN_Wrapper(
-                dim_state,
-                dim_state,
-                3, # hard-coding control-size of 3
-                num_hidden_layers,
-                layer_width,
-                activations,
-                dropout,
-                include_control,
-                fully_connected,
-                shared_weights,
-            )
+        # building 2 NNs: one for the mechanistic state and one for the latent state
+        # each NN will have the same structure, but different inputs
+
+        print(
+            "Warning: hard-coded 3 control categories (binary) to be appended to NN state input. Also assuming synchronous control times across subjects."
+        )
+        self.f_nn_markovian = FeedForwardNN_Wrapper(
+            dim_state_mech, # mechanistic state dimension
+            dim_state_mech, # mechanistic state dimension
+            3,  # hard-coding control-size of 3
+            num_hidden_layers,
+            layer_width,
+            activations,
+            dropout,
+            include_control,
+            fully_connected,
+            shared_weights,
+        )
+
+        self.f_nn_non_markovian = FeedForwardNN_Wrapper(
+            dim_state_mech+dim_state_latent, # concatenation of mechanistic and latent states
+            dim_state_mech+dim_state_latent, # concatenation of mechanistic and latent states
+            3,  # hard-coding control-size of 3
+            num_hidden_layers,
+            layer_width,
+            activations,
+            dropout,
+            include_control,
+            fully_connected,
+            shared_weights,
+        )
 
     def forward(self, t, x):
-        rhs = torch.zeros_like(x, requires_grad=True).to(x)
-
-        D = x.shape[1]  # full state dimension
-        if self.use_physics:
-            D = self.mech_ode.state_dim  # mechanistic state dimension
+        D = self.dim_state_mech
+        L = self.dim_state_latent
 
         # print(f"x({t}): ", x)
         if torch.any(torch.isnan(x)):
@@ -675,7 +726,15 @@ class HybridODE(nn.Module):
         if self.use_physics:
             # errored due to in-place operation
             # rhs[:, :D] = rhs[:, :D] + self.mech_ode.rhs(t, x)  # self.f_physics(x, t)
-            rhs = torch.cat((rhs[:, :D] + self.mech_ode.rhs(t, x[:, :D]), rhs[:, D:]), dim=1)
+            mech_rhs = torch.cat(
+                (
+                    self.mech_ode.rhs(t, x[:, :D]),
+                    torch.zeros_like(x[:, D:], requires_grad=True).to(x),
+                ),
+                dim=1,
+            )
+        else:
+            mech_rhs = torch.zeros_like(x, requires_grad=True).to(x)
 
         # determine control categories
         names = ["High Fat Diet", "Vancomycin", "Gentamicin"]
@@ -687,38 +746,54 @@ class HybridODE(nn.Module):
             ):
                 one_hot_control[:, names.index(key)] = 1
 
-        if self.use_nn:
-            x_scaled = x.clone()
+        x_scaled = x.clone()
+        # apply normalization to observed components of x
+        x_scaled[:, :D] = self.normalizer.encode(x[:, :D])
 
-            # apply normalization to observed components of x
-            x_scaled[:, :D] = self.normalizer.encode(x[:, :D])
+        # concatenate one-hot control to x_scaled and pass through NN
+        # x_scaled: (N_batch, dim_state)
+        # one_hot_control: (dim_control)
 
-            # concatenate one-hot control to x_scaled and pass through NN
-            # x_scaled: (N_batch, dim_state)
-            # one_hot_control: (dim_control)
-
-            nn_raw = self.f_nn(x_scaled, one_hot_control)
-            # nn_raw = torch.tanh(self.f_nn(x)) # this asks nn output to be in range -1 to 1
+        if self.use_nn_markovian:
+            # this is dimension (N_batch, dim_state_mech), so it will be added to rhs[:, :D]
+            nn_raw_markovian = self.f_nn_markovian(x_scaled[:, :D], one_hot_control)
 
             # sign(nn) * (10^|nn| - 1)
-            nn_scaled = torch.sign(nn_raw) * (10 ** torch.abs(nn_raw) - 1)
+            nn_scaled_markovian = torch.sign(nn_raw_markovian) * (10 ** torch.abs(nn_raw_markovian) - 1)
             # this asks nn output to be in range -10 to 10 or so. May want to have additional derivative scaling so NN outputs ~ [-1, 1].
 
-            # pass
-            # print("nn_scaled: ", nn_scaled)
-            # add_term = self.nn_coefficient_scaling * nn_scaled
-            add_term = torch.zeros_like(x, requires_grad=True).to(x)
-
+            # add_term = torch.zeros_like(x, requires_grad=True).to(x)
             # in the observed components of x, do x*NN, else do NN
             if self.pre_multiply_x:
-                add_term = torch.cat((x[:, :D] * nn_scaled[:, :D], nn_scaled[:, D:]), dim=1)
+                foo = x[:, :D] * nn_scaled_markovian
+            else:
+                foo = self.nn_coefficient_scaling * nn_scaled_markovian
+
+            add_markovian = torch.cat(
+                        (foo,
+                        torch.zeros_like(x[:, D:], requires_grad=True).to(x),
+                        ),
+                        dim=1,
+                    )
+        else:
+            add_markovian = torch.zeros_like(x, requires_grad=True).to(x)
+
+        if self.use_nn_non_markovian:
+            nn_raw_non_markovian = self.f_nn_non_markovian(x_scaled, one_hot_control)
+
+            # do re-scalings of nn_raw_non_markovian in all dimensions (including latent)
+            nn_scaled_non_markovian = torch.sign(nn_raw_non_markovian) * (10 ** torch.abs(nn_raw_non_markovian) - 1)
+
+            if self.pre_multiply_x:
+                add_non_markovian = x * nn_scaled_non_markovian
             else:
                 # Note that this will work poorly if hidden dims are constrained to be small!
-                add_term = self.nn_coefficient_scaling * nn_scaled
+                add_non_markovian = self.nn_coefficient_scaling * nn_scaled_non_markovian
+        else:
+            add_non_markovian = torch.zeros_like(x, requires_grad=True).to(x)
 
-            # print ratio of nn to physics
-            # print("nn / physics: ", torch.mean(torch.abs(add_term / rhs)))
-            rhs = rhs + add_term
+        # add all terms together
+        rhs = mech_rhs + add_markovian + add_non_markovian
 
         if torch.any(torch.isnan(rhs)):
             # print the index where the nan is

@@ -38,7 +38,8 @@ class DataAssimilatorModule(pl.LightningModule):
     def __init__(
         self,
         dim_obs=1,
-        dim_state=10,
+        dim_state_mech=10,
+        dim_state_latent=0,
         ode=None,
         odeint_use_adjoint=False,
         odeint_method="dopri5",
@@ -46,7 +47,14 @@ class DataAssimilatorModule(pl.LightningModule):
         odeint_atol=1e-9,
         odeint_options={"dtype": torch.float32},
         use_physics=False,
-        use_nn=True,
+        use_nn_markovian=True,
+        use_nn_non_markovian=False,
+        learn_physics=False,
+        learn_nn_markovian=False,
+        learn_nn_non_markovian=False,
+        learn_h=False,
+        learn_ObsCov=False,
+        learn_StateCov=False,
         nn_coefficient_scaling=1e4,
         pre_multiply_x=True,
         low_bound=1e5,
@@ -57,10 +65,6 @@ class DataAssimilatorModule(pl.LightningModule):
         include_control=True,
         fully_connected=True,
         shared_weights=False,
-        learn_physics=False,
-        learn_h=False,
-        learn_ObsCov=False,
-        learn_StateCov=False,
         da_name="3dvar",
         layer_width=50,
         burnin_frac=0.75,
@@ -81,6 +85,8 @@ class DataAssimilatorModule(pl.LightningModule):
 
         self.n_examples = n_examples
         self.loss_name = loss_name
+
+        dim_state = dim_state_mech + dim_state_latent
 
         self.dim_obs = dim_obs
         self.dim_state = dim_state
@@ -120,13 +126,20 @@ class DataAssimilatorModule(pl.LightningModule):
 
         # initialize the model
         self.model = DataAssimilator(
-            dim_state=dim_state,
+            dim_state_mech=dim_state_mech,
+            dim_state_latent=dim_state_latent,
             dim_obs=dim_obs,
             ode=ode,
             odeint_params=odeint_params,
             use_physics=use_physics,
+            use_nn_markovian=use_nn_markovian,
+            use_nn_non_markovian=use_nn_non_markovian,
             learn_physics=learn_physics,
-            use_nn=use_nn,
+            learn_nn_markovian=learn_nn_markovian,
+            learn_nn_non_markovian=learn_nn_non_markovian,
+            learn_h=learn_h,
+            learn_ObsCov=learn_ObsCov,
+            learn_StateCov=learn_StateCov,
             nn_coefficient_scaling=nn_coefficient_scaling,
             pre_multiply_x=pre_multiply_x,
             low_bound=low_bound,
@@ -140,9 +153,6 @@ class DataAssimilatorModule(pl.LightningModule):
             include_control=include_control,
             fully_connected=fully_connected,
             shared_weights=shared_weights,
-            learn_h=learn_h,
-            learn_ObsCov=learn_ObsCov,
-            learn_StateCov=learn_StateCov,
             da_name=da_name,
             normalizer=normalizer,
             normalization_stats=normalization_stats,
