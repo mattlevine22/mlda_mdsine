@@ -18,7 +18,7 @@ parser.add_argument("--run_id", type=int, default=0)
 args = parser.parse_args()
 
 # unconstrained growth rate
-PRETUNED_MECH = "lightning_logs/azuolg49/checkpoints/last.ckpt"
+PRETUNED_MECH = "lightning_logs/w686izn8/checkpoints/last.ckpt"
 
 # ## TEST CHECKPOINTS
 # PRETUNED_MECH = "lightning_logs/qyqmjdaj/checkpoints/last.ckpt"
