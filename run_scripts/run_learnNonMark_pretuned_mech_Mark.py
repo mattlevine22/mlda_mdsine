@@ -18,11 +18,18 @@ parser.add_argument("--run_id", type=int, default=0)
 args = parser.parse_args()
 
 # unconstrained growth rate
-PRETUNED_MECH = "lightning_logs/w686izn8/checkpoints/epoch=27-step=56.ckpt"
+# PRETUNED_MECH = "lightning_logs/w686izn8/checkpoints/epoch=27-step=56.ckpt"
+
+# not yet run
+PRETUNED_MECH_THEN_NN_MARK = (
+    "lightning_logs/ypr8xa01/checkpoints/epoch=24-step=50.ckpt"
+)
 
 # build a dict of experimental conditions
 exp_dict = {
-    "checkpoint_init": [("pretuned_mech", PRETUNED_MECH)],
+    # "checkpoint_init": [()],  # [None],
+    # "checkpoint_init": [("pretuned_mech", PRETUNED_MECH)],
+    "checkpoint_init": [("pretuned_mech_then_nn_mark", PRETUNED_MECH_THEN_NN_MARK)],
     "project_name": [args.project_name],
     "fast_dev_run": [args.fast_dev_run],
     "accelerator": [args.accelerator],
@@ -42,13 +49,13 @@ exp_dict = {
     "use_physics": [True],
     "learn_physics": [False],
     "use_nn_markovian": [True],
-    "learn_nn_markovian": [True],
-    "use_nn_non_markovian": [False],
-    "learn_nn_non_markovian": [False],
+    "learn_nn_markovian": [False],
+    "use_nn_non_markovian": [True],
+    "learn_nn_non_markovian": [True],
     "positive_growth_rate": [False],
     "nn_coefficient_scaling": ["x"],
     "pre_multiply_x": [True],
-    "learning_rate": [1e-1],
+    "learning_rate": [1e-3, 1e-4],
     "layer_width": [600],
     "num_hidden_layers": [4],
     "max_epochs": [30],
