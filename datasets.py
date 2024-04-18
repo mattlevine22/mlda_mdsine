@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchdiffeq import odeint
 import pytorch_lightning as pl
 from sklearn.utils import shuffle as skshuffle
+from scipy.interpolate import interp1d
 import mdsine2 as md2
 import random
 
@@ -256,8 +257,46 @@ class MDDataset(Dataset):
         # define the reference patient IDs with which we will use to define the best MCMC simulations.
         self.ref_patient_ids = ["2", "3"]
 
+        self.ref_mean_predictor = self.build_mean_predictor() # returns a function that predicts the mean of the reference patients at the given times
+
     def __len__(self):
         return len(self.patients)
+
+    def build_mean_predictor(self):
+        '''Build a function that predicts the mean of the reference patients at given times'''
+        # first collect the set of all time points across ref_patient_ids
+        t_all = []
+        for ref_id in self.ref_patient_ids:
+            t, x, mask = self.data.get_patient(ref_id)
+            t_all.append(t)
+        t_all = torch.cat(t_all)
+        # drop duplicates and sort
+        t_all = torch.unique(t_all)
+        t_all = torch.sort(t_all).values
+
+        # For each patient in ref_patient_ids, build an interpolant that can be used to predict the mean of a new patient
+        ref_interp = []
+        for ref_id in self.ref_patient_ids:
+            t, x, mask = self.data.get_patient(ref_id)
+            x = x.T
+            # build an interpolant
+            interpolant = interp1d(t, x, kind='linear', axis=0, fill_value='extrapolate')
+            ref_interp.append(interpolant)
+
+        n_states = x.shape[1]
+        def mean_predictor(times):
+            '''Predict the mean of the reference patients at the given times'''
+            # initialize the mean prediction
+            x_mean = torch.zeros(len(times), n_states)
+            # for each reference patient, predict the mean at the given times
+            for i, ref_id in enumerate(self.ref_patient_ids):
+                x = ref_interp[i](times)
+                x_mean += x
+            # average the predictions
+            x_mean /= len(self.ref_patient_ids)
+            return x_mean
+
+        return mean_predictor
 
     # compute summary statistics (mean, std, log10(mean), etc) over all patients
     def compute_invariant_stats(self):
@@ -328,6 +367,7 @@ class MDDataset(Dataset):
             mask_batch,
             controls_batch,
             self.invariant_stats_true,
+            self.ref_mean_predictor(times_batch),
         )
 
 

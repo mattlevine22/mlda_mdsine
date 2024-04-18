@@ -46,7 +46,7 @@ exp_dict = {
     "normalizer": ["max_min_log10"],
     "loss_name": ["mse"],  # ["mse"],
     "dim_state_mech": [141],  # default is [141] for GLV
-    "dim_state_latent": [10],  # default is [0] (no latent),
+    "dim_state_latent": [0],  # default is [0] (no latent),
     "low_bound": [0],  # lowest allowable value of state variables in ODE
     "high_bound": [1e12],  # highest allowable value of state variables in ODE
     "low_bound_latent": [0],  # lowest allowable value of latent variables in ODE
@@ -55,17 +55,17 @@ exp_dict = {
     "fully_connected": [True],
     "shared_weights": [False],
     "T_long": [10],
-    "use_physics": [True],
+    "use_physics": [False],
     "predict_training_mean": [False],
-    "learn_physics": [True],
-    "use_nn_markovian": [False],
-    "learn_nn_markovian": [False],
+    "learn_physics": [False],
+    "use_nn_markovian": [True],
+    "learn_nn_markovian": [True],
     "use_nn_non_markovian": [False],
     "learn_nn_non_markovian": [False],
     "positive_growth_rate": [False],
     "nn_coefficient_scaling": ["x"],
     "pre_multiply_x": [True],
-    "learning_rate": [1e-1],
+    "learning_rate": [1e-3],
     "layer_width": [600],
     "num_hidden_layers": [4],
     "max_epochs": [30],

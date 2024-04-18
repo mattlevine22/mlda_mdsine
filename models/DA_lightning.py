@@ -49,6 +49,7 @@ class DataAssimilatorModule(pl.LightningModule):
         use_physics=False,
         use_nn_markovian=True,
         use_nn_non_markovian=False,
+        predict_training_mean=False,
         learn_physics=False,
         learn_nn_markovian=False,
         learn_nn_non_markovian=False,
@@ -85,6 +86,7 @@ class DataAssimilatorModule(pl.LightningModule):
 
         self.n_examples = n_examples
         self.loss_name = loss_name
+        self.predict_training_mean = predict_training_mean
 
         dim_state = dim_state_mech + dim_state_latent
 
@@ -170,7 +172,7 @@ class DataAssimilatorModule(pl.LightningModule):
         # x is (N_times, N_batch, dim_state)
         return x
 
-    def forward(self, y_obs, times, controls):
+    def forward(self, y_obs, times, controls, x_ref_mean):
 
         if self.first_forward:
             self.first_forward = False
@@ -180,7 +182,8 @@ class DataAssimilatorModule(pl.LightningModule):
             self.t_inv = {key: val.to(y_obs.device) if val is not None else None
                     for key, val in self.t_inv.items()}
 
-        # since times currently have the same SPACING across all batches, we can reduce this to just the first batch
+        # !! Currently only works when times are the same for all batches
+        # OR when we have a batch size of 1
         times = times[0].squeeze()
 
         # TODO: check that times are being used correctly across batches
@@ -188,6 +191,15 @@ class DataAssimilatorModule(pl.LightningModule):
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.model(
             y_obs=y_obs, times=times
         )
+
+        ## if using reference data mean, substitute it in for y_pred, y_assim, x_pred, x_assim
+        if self.predict_training_mean:
+            # need to be able to compute grads for this
+            y_pred = x_ref_mean
+            y_assim = x_ref_mean
+            x_pred = x_ref_mean
+            x_assim = x_ref_mean
+
         return y_pred, y_assim, x_pred, x_assim, cov, inv_cov
 
     def loss(self, y_pred, y_obs, cov, inv_cov, mask=None):
@@ -292,9 +304,19 @@ class DataAssimilatorModule(pl.LightningModule):
         # print("Training step")
         # bp()
         # print(self.model.rhs.f_nn.state_dict())
-        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
+        (
+            y_obs,
+            x_true,
+            y_true,
+            best_mcmc_sims,
+            times,
+            mask,
+            controls,
+            invariant_stats_true,
+            x_ref_mean,
+        ) = batch
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
-            y_obs, times, controls
+            y_obs, times, controls, x_ref_mean.requires_grad_(True)
         )
         loss_dict = self.loss(y_pred, y_obs, cov, inv_cov, mask)
         for key, val in loss_dict.items():
@@ -317,6 +339,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 x_assim,
                 y_assim,
                 mask=mask,
+                x_ref_mean=x_ref_mean,
                 tag=f"Train/idx{batch_idx}",
                 n_examples=n_examples_left,
             )
@@ -377,9 +400,19 @@ class DataAssimilatorModule(pl.LightningModule):
             )
 
     def validation_step(self, batch, batch_idx):
-        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
+        (
+            y_obs,
+            x_true,
+            y_true,
+            best_mcmc_sims,
+            times,
+            mask,
+            controls,
+            invariant_stats_true,
+            x_ref_mean,
+        ) = batch
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
-            y_obs, times, controls
+            y_obs, times, controls, x_ref_mean
         )
         # compute the losses
         loss_dict = self.loss(y_pred, y_obs, cov, inv_cov, mask)
@@ -409,6 +442,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 mask=mask,
                 y_long=y_long,
                 invariant_stats_true=invariant_stats_true,
+                x_ref_mean=x_ref_mean,
                 tag=f"Val/idx{batch_idx}",
                 n_examples=n_examples_left,
             )
@@ -429,6 +463,7 @@ class DataAssimilatorModule(pl.LightningModule):
         mask=None,
         y_long=None,
         invariant_stats_true=None,
+        x_ref_mean=None,
         tag="",
         n_examples=2,
         yscale="symlog",
@@ -448,10 +483,13 @@ class DataAssimilatorModule(pl.LightningModule):
             x_pred_idx = x_pred[idx].detach().cpu().numpy()
             x_assim_idx = x_assim[idx].detach().cpu().numpy()
             y_assim_idx = y_assim[idx].detach().cpu().numpy()
+            if x_ref_mean is not None:
+                x_ref_mean_idx = x_ref_mean[idx].detach().cpu().numpy()
             if mask is not None:
                 mask_idx = mask[idx].detach().cpu().numpy()
             else:
                 mask_idx = np.ones_like(y_obs_idx)
+            mask_sum = np.sum(mask_idx, axis=1)
 
             # First, plot a single temporal trajectory that summarizes the pointwise residuals of the predictions
             plt.figure()
@@ -465,8 +503,17 @@ class DataAssimilatorModule(pl.LightningModule):
                 ncols=1,
             )
 
+            if x_ref_mean_idx is not None:
+                mean_error_ref = np.mean(np.log10(y_obs_idx) - np.log10(x_ref_mean_idx), axis=1)
+                mean_error_masked_ref = (
+                    np.sum(
+                        (mask_idx * (np.log10(y_obs_idx) - np.log10(x_ref_mean_idx))),
+                        axis=1,
+                    )
+                    / mask_sum
+                )
+
             mean_error = np.mean(np.log10(y_obs_idx) - np.log10(y_pred_idx), axis=1)
-            mask_sum = np.sum(mask_idx, axis=1)
 
             mask_sum[mask_sum == 0] = 1 # protech against division by zero
             mean_error_masked = (
@@ -521,6 +568,21 @@ class DataAssimilatorModule(pl.LightningModule):
                 color="black",
                 linestyle=":",
             )
+            if x_ref_mean is not None:
+                ax.plot(
+                    times_idx,
+                    mean_error_ref,
+                    label="Reference (Training Means): Unmasked",
+                    color="green",
+                    linestyle="-",
+                )
+                ax2.plot(
+                    times_idx,
+                    mean_error_masked_ref,
+                    label="Reference (Training Means): Masked",
+                    color="green",
+                    linestyle=":",
+                )
 
             # plot a horizontal line at 0
             ax.axhline(0, color="gray", linestyle="--")
@@ -572,6 +634,13 @@ class DataAssimilatorModule(pl.LightningModule):
                 label="Best pure mechanistic: Unmasked",
                 linestyle="-",
             )
+            if x_ref_mean is not None:
+                ax.plot(
+                    times_idx,
+                    np.abs(mean_error_ref),
+                    label="Reference (Training Means): Unmasked",
+                    linestyle="-",
+                )
             ax.set_xlabel("Time")
             ax.legend()
             fig.suptitle(
@@ -652,6 +721,16 @@ class DataAssimilatorModule(pl.LightningModule):
                     label="Best pure mechanistic",
                 )
 
+                if x_ref_mean is not None:
+                    # plot the reference mean
+                    ax.plot(
+                        times_idx,
+                        x_ref_mean_idx[:, i],
+                        ls="--",
+                        color="green",
+                        label="Reference (Training Means)",
+                    )
+
                 # plot the noisy observations that we are fitting to
                 ax.plot(
                     times_idx,
@@ -711,6 +790,15 @@ class DataAssimilatorModule(pl.LightningModule):
                     color="orange",
                     label="Best pure mechanistic",
                 )
+                if x_ref_mean is not None:
+                    # plot the reference mean
+                    ax.plot(
+                        times_idx[-20:],
+                        x_ref_mean_idx[-20:, i],
+                        ls="--",
+                        color="green",
+                        label="Reference (Training Means)",
+                    )
                 ax.plot(
                     times_idx[-20:],
                     y_obs_idx[-20:, i],
@@ -879,10 +967,10 @@ class DataAssimilatorModule(pl.LightningModule):
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         dt = self.trainer.datamodule.test_sample_rates[dataloader_idx]
-        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true = batch
+        y_obs, x_true, y_true, best_mcmc_sims, times, mask, controls, invariant_stats_true, x_ref_mean = batch
 
         y_pred, y_assim, x_pred, x_assim, cov, inv_cov = self.forward(
-            y_obs, times, controls
+            y_obs, times, controls, x_ref_mean
         )
 
         # compute the losses
@@ -918,6 +1006,7 @@ class DataAssimilatorModule(pl.LightningModule):
                 mask=mask,
                 y_long=y_long,
                 invariant_stats_true=invariant_stats_true,
+                x_ref_mean=x_ref_mean,
                 tag=f"Test/idx{batch_idx}/dt{dt}",
                 n_examples=n_examples_left,
             )
