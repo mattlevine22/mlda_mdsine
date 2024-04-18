@@ -193,8 +193,9 @@ class DataAssimilator(nn.Module):
         # for param in self.mech_ode.r.parameters():
         #     param.requires_grad = learn_physics
         if learn_physics:
-            print("Warning: only learning the r parameter in the ODE (growth rate).")
+            print("Warning: learning the A (interactions) and r parameter in the ODE (growth rate).")
             self.rhs.mech_ode.r.requires_grad = True
+            self.rhs.mech_ode.A.requires_grad = True
 
         # set learnability of scale parameters
         self.Gamma_scale.requires_grad = learn_ObsCov
@@ -652,10 +653,13 @@ class HybridODE(nn.Module):
         self.use_nn_markovian = use_nn_markovian
         self.use_nn_non_markovian = use_nn_non_markovian
         self.normalizer = normalizer
+
+        # These bounds are used to clamp the state variables AND then the same values are used to clamp the overall RHS.
         self.low_bound = low_bound
         self.high_bound = high_bound
         self.low_bound_latent = low_bound_latent
         self.high_bound_latent = high_bound_latent
+
         self.nn_coefficient_scaling = nn_coefficient_scaling
         self.pre_multiply_x = pre_multiply_x
 
@@ -818,6 +822,20 @@ class HybridODE(nn.Module):
         # latent
         max_condition = x[:, D:] == self.high_bound_latent
         rhs[:, D:][max_condition] = torch.clamp_max(rhs[:, D:][max_condition], 0)
+
+
+        # finally, clamp rhs to be in range of [low_bound, high_bound] for observed components of x and [low_bound_latent, high_bound_latent] for latent components of x
+        rhs = torch.cat(
+            (
+                torch.clamp(
+                    rhs[:, :D], self.low_bound, self.high_bound
+                ),  # mechanistic state clamp
+                torch.clamp(
+                    rhs[:, D:], self.low_bound_latent, self.high_bound_latent
+                ),  # latent state clamp
+            ),
+            dim=1,
+        )
 
         # print(f"rhs({t}): ", rhs)
         return rhs

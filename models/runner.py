@@ -86,6 +86,7 @@ class Runner:
         shared_weights=False,
         max_epochs=1,
         shuffle="every epoch",
+        heavy_logging=False,
         log_every_n_steps=1,
         gradient_clip_val=10.0,
         gradient_clip_algorithm="value",
@@ -122,6 +123,7 @@ class Runner:
 
         self.model_hyperparams = {
             "monitor_metric": monitor_metric,
+            "heavy_logging": heavy_logging,
             "loss_name": loss_name,
             "lr_scheduler_params": lr_scheduler_params,
             "dim_state_mech": dim_state_mech,

@@ -72,6 +72,7 @@ class DataAssimilatorModule(pl.LightningModule):
         learning_rate=0.01,
         activation="gelu",
         monitor_metric="train_loss",
+        heavy_logging=False,
         loss_name="nll",
         lr_scheduler_params={"patience": 3, "factor": 0.5},
         dropout=0.1,
@@ -87,6 +88,7 @@ class DataAssimilatorModule(pl.LightningModule):
         self.n_examples = n_examples
         self.loss_name = loss_name
         self.predict_training_mean = predict_training_mean
+        self.heavy_logging = heavy_logging
 
         dim_state = dim_state_mech + dim_state_latent
 
@@ -347,22 +349,24 @@ class DataAssimilatorModule(pl.LightningModule):
         return loss_dict[self.loss_name]
 
     def on_after_backward(self):
-        self.log_gradient_norms(tag="afterBackward")
+        if self.heavy_logging:
+            self.log_gradient_norms(tag="afterBackward")
 
     def on_before_optimizer_step(self, optimizer):
         # Compute the 2-norm for each layer and its gradient
         # If using mixed precision, the gradients are already unscaled here
-        self.log_gradient_norms(tag="beforeOptimizer")
-        self.log_parameter_norms(tag="beforeOptimizer")
+        if self.heavy_logging:
+            self.log_gradient_norms(tag="beforeOptimizer")
+            self.log_parameter_norms(tag="beforeOptimizer")
 
-        wandb.log({"parameters/C_scale": self.model.C_scale.detach()})
-        wandb.log({"parameters/Gamma_scale": self.model.Gamma_scale.detach()})
-        wandb.log({"parameters/initial_state_mean": self.model.prior_mean.detach()})
-        self.log_matrix(self.model.prior_cov.weight.detach(), tag="initial_state_cov")
-        self.log_matrix(self.model.Gamma_cov.weight.detach(), tag="Gamma_cov")
-        self.log_matrix(self.model.C_cov.weight.detach(), tag="C_cov")
-        self.log_matrix(self.model.K.detach(), tag="K")
-        self.log_matrix(self.model.h_obs.weight.detach(), tag="h_obs")
+            wandb.log({"parameters/C_scale": self.model.C_scale.detach()})
+            wandb.log({"parameters/Gamma_scale": self.model.Gamma_scale.detach()})
+            wandb.log({"parameters/initial_state_mean": self.model.prior_mean.detach()})
+            self.log_matrix(self.model.prior_cov.weight.detach(), tag="initial_state_cov")
+            self.log_matrix(self.model.Gamma_cov.weight.detach(), tag="Gamma_cov")
+            self.log_matrix(self.model.C_cov.weight.detach(), tag="C_cov")
+            self.log_matrix(self.model.K.detach(), tag="K")
+            self.log_matrix(self.model.h_obs.weight.detach(), tag="h_obs")
 
     def log_matrix(self, matrix, tag=""):
         # log the learned constant gain K self.model.K.weight.detach()
