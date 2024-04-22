@@ -1018,7 +1018,42 @@ class DataAssimilatorModule(pl.LightningModule):
         return loss_dict[self.loss_name]
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        # Gather special parameters
+        special_params = {
+            "r": [self.model.rhs.mech_ode.r],
+            "A": [self.model.rhs.mech_ode.A],
+            "f_nn_markovian": list(self.model.rhs.f_nn_markovian.parameters()),
+            "f_nn_non_markovian": list(self.model.rhs.f_nn_non_markovian.parameters()),
+        }
+
+        # Create parameter groups
+        param_groups = []
+        all_special_params = set()
+
+        for name, params in special_params.items():
+            # check if learning rate is a dictionary
+            if isinstance(self.learning_rate, dict) and name in self.learning_rate:
+                lr = self.learning_rate[name]
+            else:
+                print(f"Using default learning rate for {name}")
+                lr = self.learning_rate
+
+            param_group = {"params": params, "lr": lr}
+            param_groups.append(param_group)
+            all_special_params.update(params)
+
+        # Identity set for checking
+        all_special_ids = {id(p) for p in all_special_params}
+
+        # Default group for other parameters
+        default_params = [
+            p for p in self.model.parameters() if id(p) not in all_special_ids
+        ]
+        default_group = {"params": default_params, "lr": self.learning_rates["default"]}
+        param_groups.append(default_group)
+
+        # Configure the optimizer with all parameter groups
+        optimizer = torch.optim.Adam(param_groups)
         config = {
             # REQUIRED: The scheduler instance
             "scheduler": ReduceLROnPlateau(
