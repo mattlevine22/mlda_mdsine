@@ -1049,7 +1049,7 @@ class DataAssimilatorModule(pl.LightningModule):
         default_params = [
             p for p in self.model.parameters() if id(p) not in all_special_ids
         ]
-        default_group = {"params": default_params, "lr": self.learning_rates["default"]}
+        default_group = {"params": default_params, "lr": self.learning_rate["default"]}
         param_groups.append(default_group)
 
         # Configure the optimizer with all parameter groups
