@@ -105,7 +105,7 @@ exp_dict = {
     "layer_width": [600],
     "num_hidden_layers": [4],
     "max_epochs": [30],
-    "lr_scheduler_params": [{"patience": 10, "factor": 0.1}],
+    "lr_scheduler_params": [{"patience": 5, "factor": 0.1}],
     "odeint_use_adjoint": [False],
     "odeint_method": ["rk4"],
     "odeint_options": [{"dtype": torch.float32, "step_size": 0.01}],
