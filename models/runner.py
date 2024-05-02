@@ -1,4 +1,6 @@
 # Import deep learning modules
+import os
+import numpy as np
 import torch
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.loggers import WandbLogger
@@ -19,6 +21,60 @@ from models.DA_lightning import DataAssimilatorModule
 
 from pdb import set_trace as bp
 
+
+class PredictionCheckpoint(ModelCheckpoint):
+    def __init__(self, datamodule, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.datamodule = datamodule
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        super().on_train_epoch_end(trainer, pl_module)
+        self.save_predictions(trainer, pl_module)
+
+    def save_predictions(self, trainer, pl_module):
+
+        # Concatenate and save predictions
+        predictions_path = os.path.join(
+            self.dirpath,
+            f"predictions_epoch{trainer.current_epoch}.npy",
+        )
+
+        # Ensure model is in evaluation mode
+        pl_module.eval()
+        stages = ["train", "val"]  # You can add 'test' if you run test after each epoch
+
+        output = {}
+        with torch.no_grad():
+            for stage in stages:
+                output[stage] = {}
+                predictions = []
+                dataloader = getattr(self.datamodule, f"{stage}_dataloader")()
+                inds = self.datamodule.inds[stage]
+                # for batch in dataloader:
+                for i, batch in enumerate(dataloader):
+                    ind = inds[i]
+                    (
+                        y_obs,
+                        x_true,
+                        y_true,
+                        best_mcmc_sims,
+                        times,
+                        mask,
+                        controls,
+                        invariant_stats_true,
+                        x_ref_mean,
+                    ) = batch
+                    y_pred, y_assim, x_pred, x_assim, cov, inv_cov = pl_module(
+                        y_obs, times, controls, x_ref_mean.requires_grad_(True)
+                    )
+                    output[stage][ind] = {
+                        "times": times.detach().cpu().numpy(),
+                        "y_obs": y_obs.detach().cpu().numpy(),
+                        "y_pred": y_pred.detach().cpu().numpy(),
+                    }
+
+            np.save(predictions_path, output)
+            # to load use "x = np.load(mypath, allow_pickle=True).item()"
 
 class Runner:
 
@@ -247,10 +303,10 @@ class Runner:
             verbose=True,
         )
 
-        # Create a model checkpoint callback
-        checkpoint_callback = ModelCheckpoint(
+        checkpoint_callback = PredictionCheckpoint(
             monitor=self.model_hyperparams["monitor_metric"],
             save_last=True,
+            datamodule=datamodule,
         )
 
         # aggregate all callbacks
