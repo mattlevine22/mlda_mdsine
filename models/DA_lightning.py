@@ -1031,12 +1031,13 @@ class DataAssimilatorModule(pl.LightningModule):
         all_special_params = set()
 
         for name, params in special_params.items():
-            # check if learning rate is a dictionary
-            if isinstance(self.learning_rate, dict) and name in self.learning_rate:
+            try:
                 lr = self.learning_rate[name]
-            else:
-                print(f"Using default learning rate for {name}")
-                lr = self.learning_rate
+            except:
+                try:
+                    lr = self.learning_rate["default"]
+                except:
+                    lr = self.learning_rate
 
             param_group = {"params": params, "lr": lr}
             param_groups.append(param_group)
@@ -1050,9 +1051,9 @@ class DataAssimilatorModule(pl.LightningModule):
             p for p in self.model.parameters() if id(p) not in all_special_ids
         ]
 
-        if isinstance(self.learning_rate, dict) and "default" in self.learning_rate:
+        try:
             lr = self.learning_rate["default"]
-        else:
+        except:
             lr = self.learning_rate
         default_group = {"params": default_params, "lr": lr}
         param_groups.append(default_group)

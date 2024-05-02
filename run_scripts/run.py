@@ -65,7 +65,7 @@ exp_dict = {
     "positive_growth_rate": [False],
     "nn_coefficient_scaling": ["x"],
     "pre_multiply_x": [True],
-    "learning_rate": [1e-1],
+    "learning_rate": [{"r":1e-1, "default":0.0}],
     "layer_width": [600],
     "num_hidden_layers": [4],
     "max_epochs": [30],
