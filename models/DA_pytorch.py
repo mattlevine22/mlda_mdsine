@@ -823,19 +823,5 @@ class HybridODE(nn.Module):
         max_condition = x[:, D:] == self.high_bound_latent
         rhs[:, D:][max_condition] = torch.clamp_max(rhs[:, D:][max_condition], 0)
 
-
-        # finally, clamp rhs to be in range of [low_bound, high_bound] for observed components of x and [low_bound_latent, high_bound_latent] for latent components of x
-        rhs = torch.cat(
-            (
-                torch.clamp(
-                    rhs[:, :D], self.low_bound, self.high_bound
-                ),  # mechanistic state clamp
-                torch.clamp(
-                    rhs[:, D:], self.low_bound_latent, self.high_bound_latent
-                ),  # latent state clamp
-            ),
-            dim=1,
-        )
-
         # print(f"rhs({t}): ", rhs)
         return rhs
