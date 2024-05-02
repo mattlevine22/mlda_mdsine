@@ -46,7 +46,7 @@ exp_dict = {
     "normalizer": ["max_min_log10"],
     "loss_name": ["mse"],  # ["mse"],
     "dim_state_mech": [141],  # default is [141] for GLV
-    "dim_state_latent": [10],  # default is [0] (no latent),
+    "dim_state_latent": [0, 10, 200],  # default is [0] (no latent),
     "low_bound": [0],  # lowest allowable value of state variables in ODE
     "high_bound": [1e12],  # highest allowable value of state variables in ODE
     "low_bound_latent": [0],  # lowest allowable value of latent variables in ODE
@@ -55,55 +55,19 @@ exp_dict = {
     "fully_connected": [True],
     "shared_weights": [False],
     "T_long": [10],
-    "use_physics": [True],
+    "use_physics": [False],
     "predict_training_mean": [False],
-    "learn_physics": [True],
+    "learn_physics": [False],
     "use_nn_markovian": [False],
     "learn_nn_markovian": [False],
-    "use_nn_non_markovian": [False],
-    "learn_nn_non_markovian": [False],
+    "use_nn_non_markovian": [True],
+    "learn_nn_non_markovian": [True],
     "positive_growth_rate": [False],
     "nn_coefficient_scaling": ["x"],
     "pre_multiply_x": [True],
-    "learning_rate": [
-        {
-            "default": 0.0,
-            "r": 0.1,
-            "A": 0.0,
-        },
-        {
-            "default": 0.0,
-            "r": 0.2,
-            "A": 0.0,
-        },
-        {
-            "default": 0.0,
-            "r": 0.1,
-            "A": 1e-13,
-        },
-        {
-            "default": 0.0,
-            "r": 0.2,
-            "A": 1e-13,
-        },
-        {
-            "default": 0.0,
-            "r": 0.05,
-            "A": 1e-13,
-        },
-        {
-            "default": 0.0,
-            "r": 0.1,
-            "A": 1e-14,
-        },
-        {
-            "default": 0.0,
-            "r": 0.1,
-            "A": 5e-12,
-        },
-    ],
-    "layer_width": [600],
-    "num_hidden_layers": [4],
+    "learning_rate": [1e-3, 1e-4],
+    "layer_width": [600, 2000],
+    "num_hidden_layers": [2, 4, 8],
     "max_epochs": [100],
     "lr_scheduler_params": [{"patience": 10, "factor": 0.1}],
     "odeint_use_adjoint": [False],
