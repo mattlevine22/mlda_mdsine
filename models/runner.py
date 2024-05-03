@@ -155,7 +155,12 @@ class Runner:
         monitor_metric = f"loss/val/{loss_name}"
 
         if devices != "auto":
-            devices = [int(devices)]  # use this to specify a single device
+            if accelerator == "cpu":
+                devices = int(devices)
+            else:
+                devices = [int(devices)]  # use this to specify a single device
+            # Print the device and its type
+            print("Devices: ", devices)
 
         self.project_name = project_name
 

@@ -709,7 +709,8 @@ class HybridODE(nn.Module):
         L = self.dim_state_latent
 
         # print(f"x({t}): ", x)
-        if torch.any(torch.isnan(x)):
+        if torch.any(torch.isnan(x)) or torch.any(torch.isinf(x)):
+            print("Invalid values detected")
             bp()
 
         # clamp x to be in range [1e5, 1e12] ...recall that 1e5 is detection threshold
@@ -799,8 +800,8 @@ class HybridODE(nn.Module):
         # add all terms together
         rhs = mech_rhs + add_markovian + add_non_markovian
 
-        if torch.any(torch.isnan(rhs)):
-            # print the index where the nan is
+        if torch.any(torch.isnan(rhs)) or torch.any(torch.isinf(rhs)):
+            print("Invalid values detected")
             bp()
 
         # clamp rhs to be non-negative for states where x is at the lower bound
