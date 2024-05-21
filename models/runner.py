@@ -296,6 +296,11 @@ class Runner:
 
         # Set callbacks for trainer (lr monitor, early stopping)
 
+        # Check if there are learnable parameters. if not, don't use gradient clipping (it errors)
+        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if n_trainable == 0:
+            self.trainer_hyperparams["gradient_clip_val"] = None
+
         # Create a PyTorch Lightning trainer with the WandbLogger
         # used this link to find LRmonitor: https://community.wandb.ai/t/how-to-log-the-learning-rate-with-pytorch-lightning-when-using-a-scheduler/3964/5
         lr_monitor = LearningRateMonitor(logging_interval="step")
