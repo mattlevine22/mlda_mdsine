@@ -71,6 +71,9 @@ class PredictionCheckpoint(ModelCheckpoint):
                         "times": times.detach().cpu().numpy(),
                         "y_obs": y_obs.detach().cpu().numpy(),
                         "y_pred": y_pred.detach().cpu().numpy(),
+                        "y_assim": y_assim.detach().cpu().numpy(),
+                        "x_pred": x_pred.detach().cpu().numpy(),
+                        "x_assim": x_assim.detach().cpu().numpy(),
                     }
 
             np.save(predictions_path, output)
