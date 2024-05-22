@@ -389,3 +389,5 @@ class Runner:
 
         # print final value of growth rate
         print("Final growth rate: ", model.model.rhs.mech_ode.r)
+
+        wandb.finish()
