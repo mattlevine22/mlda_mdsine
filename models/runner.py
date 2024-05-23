@@ -66,7 +66,7 @@ class PredictionCheckpoint(ModelCheckpoint):
                         x_ref_mean,
                     ) = batch
                     y_pred, y_assim, x_pred, x_assim, cov, inv_cov = pl_module(
-                        y_obs.to(device), times.to(device), controls.to(device), x_ref_mean.to(device).requires_grad_(True)
+                        y_obs.to(device), times.to(device), controls, x_ref_mean.to(device).requires_grad_(True)
                     )
                     output[stage][ind] = {
                         "times": times.detach().cpu().numpy(),
