@@ -90,6 +90,7 @@ class Runner:
         devices="auto",
         deterministic=True,  # set to False to get different results each time
         project_name="mdsine2",
+        run_name=None,
         train_inds=["2", "3"],
         val_inds=["4", "5"],
         test_inds=["4", "5"],
@@ -166,6 +167,7 @@ class Runner:
             print("Devices: ", devices)
 
         self.project_name = project_name
+        self.run_name = run_name
 
         self.profiler = profiler
 
@@ -266,7 +268,7 @@ class Runner:
         all_param_dict = {k: v for d in list_of_dicts for k, v in d.items()}
 
         # Initialize WandB logger
-        wandb.init(project=self.project_name, config=all_param_dict)
+        wandb.init(project=self.project_name, config=all_param_dict, name=self.run_name)
         wandb_logger = WandbLogger()
 
         # Load the DataModule
