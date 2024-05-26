@@ -786,14 +786,34 @@ class HybridODE(nn.Module):
         if self.use_nn_non_markovian:
             nn_raw_non_markovian = self.f_nn_non_markovian(x_scaled, one_hot_control)
 
-            # do re-scalings of nn_raw_non_markovian in all dimensions (including latent)
-            nn_scaled_non_markovian = torch.sign(nn_raw_non_markovian) * (10 ** torch.abs(nn_raw_non_markovian) - 1)
+            # do re-scalings so that nn_scaled_non_markovian = [nn_scaled[:D], nn_raw[D:]], with sign(nn) * (10^|nn| - 1) scaling
+            nn_scaled_non_markovian = nn_raw_non_markovian.clone()
 
+            nn_scaled_non_markovian[:, :D] = torch.sign(nn_raw_non_markovian[:, :D]) * (
+                10 ** torch.abs(nn_raw_non_markovian[:, :D]) - 1
+            )
+
+            # WARNING: this pre-multiplication makes sense in the mechanistic components
+            # But it should not be applied so naively in the latent components!!!
             if self.pre_multiply_x:
                 add_non_markovian = x * nn_scaled_non_markovian
             else:
                 # Note that this will work poorly if hidden dims are constrained to be small!
                 add_non_markovian = self.nn_coefficient_scaling * nn_scaled_non_markovian
+
+            if self.pre_multiply_x:
+                foo = x[:, :D] * nn_scaled_non_markovian[:, :D]
+            else:
+                foo = self.nn_coefficient_scaling * nn_scaled_non_markovian[:, :D]
+
+            add_non_markovian = torch.cat(
+                (
+                    foo,
+                    nn_scaled_non_markovian[:, D:],  # latent state components
+                ),
+                dim=1,
+            )
+
         else:
             add_non_markovian = torch.zeros_like(x, requires_grad=True).to(x)
 
